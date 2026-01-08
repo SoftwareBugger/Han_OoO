@@ -31,7 +31,5 @@ HanOoO exists to build a mental model you can trust by implementing the real mac
 ---
 
 ## Architecture Overview
-![alt text](path/to/image.png)
-
-High-level pipeline:
+![alt text](OoO_RV32I.drawio.png)
 
