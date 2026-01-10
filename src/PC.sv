@@ -52,18 +52,23 @@ module PC (
     localparam int PC_QUEUE_SIZE = 8;
     logic [31:0] pc_req_q, pc_req_next;
     logic [31:0] pc_issued_q [PC_QUEUE_SIZE-1:0];
+    logic pred_taken_q [PC_QUEUE_SIZE-1:0];
+    logic [31:0] pred_target_q [PC_QUEUE_SIZE-1:0];
     logic pc_epoch_q [PC_QUEUE_SIZE-1:0];
     logic [$clog2(PC_QUEUE_SIZE)-1:0] pc_issued_head, pc_issued_tail;
 
     logic pred_valid;
+
+    logic              pred_taken_bp;
+    logic [31:0]       pred_target_bp;
 
     branch_predictor bp (
         .clk(clk),
         .rst_n(rst_n),
         .pred_pc(pc_req_q),
         .pred_valid(pred_valid),
-        .pred_taken(pred_taken),
-        .pred_target(pred_target),
+        .pred_taken(pred_taken_bp),
+        .pred_target(pred_target_bp),
         .update_valid(update_valid),
         .update_pc(update_pc),
         .update_taken(update_taken),
@@ -109,8 +114,8 @@ module PC (
             // hold PC
             pc_req_next = pc_req_q;
         end else if (imem_req_fire) begin
-            if (pred_valid && pred_taken)
-                pc_req_next = pred_target;
+            if (pred_valid && pred_taken_bp)
+                pc_req_next = pred_target_bp;
             else
                 pc_req_next = pc_req_q + 32'd4;
         end
@@ -124,6 +129,8 @@ module PC (
             for (int i = 0; i < PC_QUEUE_SIZE; i++) begin
                 pc_issued_q[i] <= 32'h0000_0000;
                 pc_epoch_q[i] <= 1'b0;
+                pred_taken_q[i] <= 1'b0;
+                pred_target_q[i] <= 32'h0000_0000;
             end
         end else begin
             pc_req_q <= pc_req_next;
@@ -133,6 +140,8 @@ module PC (
             if (imem_req_fire) begin
                 pc_issued_q[pc_issued_tail] <= pc_req_q;
                 pc_epoch_q[pc_issued_tail] <= fetch_global_epoch;
+                pred_taken_q[pc_issued_tail] <= pred_taken_bp;
+                pred_target_q[pc_issued_tail] <= pred_target_bp;
                 pc_issued_tail <= pc_issued_tail + 1;
             end
         end
@@ -143,21 +152,18 @@ module PC (
             fetch_pc <= 32'h0000_0000;
             fetch_valid <= 1'b0;
             fetch_inst <= 32'b0;
+            fetch_epoch <= 1'b0;
+            pred_taken <= 1'b0;
+            pred_target <= 32'h0000_0000;
         end else if (imem_resp_fire) begin
             fetch_pc <= pc_issued_q[pc_issued_head];
             fetch_valid <= 1'b1;
             fetch_inst <= imem_resp_inst;
+            fetch_epoch <= pc_epoch_q[pc_issued_head];
+            pred_taken <= pred_taken_q[pc_issued_head];
+            pred_target <= pred_target_q[pc_issued_head];
         end else if (fetch_fire) begin
             fetch_valid <= 1'b0;
         end
     end
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            fetch_epoch <= 32'b0;
-        end else if (fetch_fire) begin
-            fetch_epoch <= (fetch_global_epoch == pc_epoch_q[pc_issued_head]) ? fetch_global_epoch : ~fetch_global_epoch;
-        end
-    end
-
 endmodule

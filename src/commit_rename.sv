@@ -130,7 +130,7 @@ module commit_rename #(
 
     // RAT rename only fires when allocation actually succeeds (full handshake)
     // Recovery takes priority in the RAT module itself
-    assign i_rat_rename_valid = alloc_valid && alloc_ready && (~recover_valid);
+    assign i_rat_rename_valid = alloc_valid && alloc_ready && (~recover_valid) && alloc_bundle.uses_rd;
 
     RAT #(
         .ARCH_REGS(ARCH_REGS),
@@ -217,7 +217,7 @@ module commit_rename #(
          * Recovery (from branch mispredict)
          * ========================= */
         .recover_valid      (recover_valid),
-        .recover_rob_idx    (recover_rob_idx),
+        .recover_cur_rob_idx    (recover_rob_idx),
         .recover_entry      (recover_entry),
 
         /* =========================

@@ -213,7 +213,6 @@ module execute (
     logic              bru_wb_uses_rd;
     logic [1:0]        bru_wb_epoch;
     logic [31:0]       bru_wb_data;
-    logic              br_valid;
     logic              act_taken;
     logic [31:0]       target_pc;
     logic              mispredict;
@@ -241,7 +240,6 @@ module execute (
         .wb_epoch(bru_wb_epoch),
         .wb_data(bru_wb_data),
 
-        .br_valid(br_valid),
         .act_taken(act_taken),
         .target_pc(target_pc),
 
@@ -406,6 +404,12 @@ module execute (
         .bru_wb_epoch      (bru_wb_epoch),
         .bru_wb_uses_rd    (bru_wb_uses_rd),
         .bru_wb_pc         (bru_wb_pc),
+
+        .bru_act_taken     (act_taken),
+        .bru_mispredict    (mispredict),
+        .bru_redirect_valid(redirect_valid),
+        .bru_redirect_pc   (redirect_pc),   
+
 
         // LSU writeback
         .lsu_wb_valid      (lsu_wb_valid),

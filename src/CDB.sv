@@ -29,7 +29,6 @@ module CDB (
     // BRU resolution + optional rd writeback (JAL/JALR)
     //   completion == br_valid
     // -----------------------------
-    input  logic              bru_br_valid,     // branch resolved (even if no rd writeback)
     input  logic              bru_wb_valid,     // rd writeback valid (JAL/JALR), may be 0 for pure branches
     output logic              bru_wb_ready,
     input  logic [ROB_W-1:0]  bru_wb_rob_idx,
@@ -81,12 +80,9 @@ module CDB (
 
     sel_e sel;
 
-    logic bru_any_valid;
-    assign bru_any_valid = bru_br_valid; // completion for branches comes from br_valid
-
     always_comb begin
         sel = SEL_NONE;
-        if      (bru_any_valid) sel = SEL_BRU;
+        if      (bru_wb_valid) sel = SEL_BRU;
         else if (lsu_wb_valid)  sel = SEL_LSU;
         else if (alu_wb_valid)  sel = SEL_ALU;
         else                    sel = SEL_NONE;
@@ -101,7 +97,7 @@ module CDB (
 
         unique case (sel)
             SEL_BRU: begin
-                wb_valid          = bru_any_valid;
+                wb_valid          = bru_wb_valid;
 
                 wb_pkt.rob_idx    = bru_wb_rob_idx;
                 wb_pkt.epoch      = bru_wb_epoch;
@@ -194,7 +190,7 @@ module CDB (
     // ============================================================
     // Backpressure to FUs
     //  - Only the selected producer sees ready.
-    //  - For BRU, we gate with bru_any_valid selection (br_valid).
+    //  - For BRU, we gate with bru_wb_valid selection (br_valid).
     // ============================================================
     assign bru_wb_ready = (sel == SEL_BRU) && wb_ready;
     assign lsu_wb_ready = (sel == SEL_LSU) && wb_ready;

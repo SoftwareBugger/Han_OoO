@@ -22,7 +22,7 @@ module cpu_core (
     logic decode_ready_rob; // from ROB to throttle decode when ROB is full
     logic decode_ready_stq; // from Store Queue to throttle decode when STQ is full
     logic decode_ready_rs;  // from RS to throttle decode when RS is full
-    assign decode_ready = decode_ready_rob && (((decoded_bundle.uop_class != UOP_STORE) && decode_valid) || decode_ready_stq) && decode_ready_rs;
+    assign decode_ready = decode_ready_rob && (((decoded_bundle.uop_class != UOP_STORE)) || decode_ready_stq) && decode_ready_rs;
     assign decode_ready_stq = stq_alloc_ready;
     assign decode_ready_rs = disp_ready;
 
@@ -209,7 +209,8 @@ module cpu_core (
     );
 
     // =========================================================================
-    // Dispatch Logic: Build rs_uop_t from decoded_bundle + rename info
+    // Dispatch Logic: Build rs_uop_t from decoded_bundle + rename info,
+    // including ready bits and source physical registers with bypassing
     // =========================================================================
     always_comb begin
         disp_uop.bundle = decoded_bundle;
@@ -223,11 +224,13 @@ module cpu_core (
         // Physical register 0 is always ready (hardwired zero in RISC-V)
         disp_uop.rdy1 = !decoded_bundle.uses_rs1 || 
                         (rs1_phys == '0) || 
-                        prf_ready_vec[rs1_phys];
+                        prf_ready_vec[rs1_phys] ||
+                        (wb_valid && (wb_pkt.prd_new == rs1_phys) && wb_pkt.data_valid);
         
         disp_uop.rdy2 = !decoded_bundle.uses_rs2 || 
                         (rs2_phys == '0) || 
-                        prf_ready_vec[rs2_phys];
+                        prf_ready_vec[rs2_phys] ||
+                        (wb_valid && (wb_pkt.prd_new == rs2_phys) && wb_pkt.data_valid);
     end
 
     // Dispatch valid only when rename accepts and execute is ready
@@ -239,15 +242,16 @@ module cpu_core (
     
     // PRF writeback signals from CDB
     assign prf_wb_valid = wb_valid && wb_pkt.uses_rd && wb_pkt.data_valid;
+    assign prf_wb_ready = wb_ready;
     assign prf_wb_pd = wb_pkt.prd_new;
     assign prf_wb_data = wb_pkt.data;
     assign prf_wb_epoch = wb_pkt.epoch;
     
     // PRF allocation signals: mark newly allocated register as not-ready
     // This happens during recovery when we're walking back the ROB
-    assign prf_recovery_alloc_valid = recover_valid && recover_entry.uses_rd;
-    assign prf_recovery_alloc_pd_new = recover_entry.pd_new;
-    assign prf_recovery_alloc_epoch = global_epoch;
+    assign prf_recovery_alloc_valid = (recover_valid && recover_entry.uses_rd) || (decode_ready && decode_valid && decoded_bundle.uses_rd);
+    assign prf_recovery_alloc_pd_new = recover_valid ? recover_entry.pd_new : rd_new_phys;
+    assign prf_recovery_alloc_epoch = recover_valid ? recover_entry.epoch : global_epoch;
     
     PRF #(
         .PHYS_REGS(PHYS_REGS),
@@ -272,6 +276,7 @@ module cpu_core (
 
         // Writeback: write data and mark ready
         .wb_valid(prf_wb_valid),
+        .wb_ready(prf_wb_ready),
         .wb_pd(prf_wb_pd),
         .wb_data(prf_wb_data),
         .wb_epoch(prf_wb_epoch),
@@ -355,7 +360,8 @@ module cpu_core (
     assign redirect_pc = wb_pkt.redirect_pc;
 
     // Flush on recovery (triggered by mispredict writeback)
-    assign flush_valid = recover_valid;
+    // TODO: implement flush when necessary
+    assign flush_valid = 1'b0; // recover_valid;
     assign flush_rob_idx = recover_rob_idx;
     assign flush_epoch = global_epoch;
 

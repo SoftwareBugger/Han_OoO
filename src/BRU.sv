@@ -20,7 +20,6 @@ module BRU (
   output logic [31:0] wb_data,
   output logic [31:0] wb_pc,
 
-  output logic        br_valid,
   output logic        act_taken,
   output logic [31:0] target_pc,
 
@@ -85,6 +84,9 @@ module BRU (
       mispredict_c = 1'b1;
     end else if (act_taken_c && (target_pc_c != req_uop.bundle.pred_target)) begin
       mispredict_c = 1'b1;
+    end else if (req_uop.bundle.uop_class == UOP_JUMP) begin
+      // Always treat jumps as mispredicts to force redirection
+      mispredict_c = 1'b1;
     end
   end
 
@@ -111,14 +113,14 @@ module BRU (
   logic        out_mispredict_q;
   logic [31:0] out_redirect_pc_q;
 
-  logic out_needs_wb_q;
-  assign out_needs_wb_q = out_uses_rd_q;
+  // logic out_needs_wb_q;
+  // assign out_needs_wb_q = out_uses_rd_q;
 
   // Retire from output buffer when:
   // - buffer valid, AND
   // - either no WB needed OR wb_ready is high
   logic out_deq_fire;
-  assign out_deq_fire = out_vld_q && (!out_needs_wb_q || wb_ready);
+  assign out_deq_fire = out_vld_q && wb_ready;//(!out_needs_wb_q || wb_ready);
 
   // Can accept a new request if:
   // - output buffer empty, OR
@@ -168,7 +170,6 @@ module BRU (
   // ============================================================
   // Outputs asserted when output buffer is retiring
   // ============================================================
-  assign br_valid   = out_deq_fire;
   assign act_taken  = out_act_taken_q;
   assign target_pc  = out_target_pc_q;
   assign mispredict = out_mispredict_q;

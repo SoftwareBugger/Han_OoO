@@ -23,6 +23,7 @@ module PRF #(
 
   // Writeback: write data and mark ready
   input  logic              wb_valid,
+  input  logic              wb_ready,
   input  logic [PHYS_W-1:0] wb_pd,
   input  logic [DW-1:0]     wb_data,
   input  logic [1:0]        wb_epoch,
@@ -31,9 +32,9 @@ module PRF #(
   output logic [PHYS_REGS-1:0] ready_vec
 );
 
-  logic [DW-1:0] mem   [PHYS_REGS];
-  logic          ready [PHYS_REGS];
-  logic [1:0]    epoch [PHYS_REGS];
+  logic [DW-1:0] mem   [PHYS_REGS-1:0];
+  logic          ready [PHYS_REGS-1:0];
+  logic [1:0]    epoch [PHYS_REGS-1:0];
 
   // Combinational reads
   always_comb begin
@@ -66,8 +67,8 @@ module PRF #(
       if (recovery_alloc_valid ) begin
         ready[recovery_alloc_pd_new] <= 1'b0;
         epoch[recovery_alloc_pd_new] <= recovery_alloc_epoch; // this should be a new epoch after mispredict
-      end
-      if (wb_valid && (epoch[wb_pd] == wb_epoch)) begin
+      end 
+      if (wb_valid && wb_ready && (epoch[wb_pd] == wb_epoch)) begin
         mem[wb_pd]   <= wb_data;
         ready[wb_pd] <= 1'b1;
       end

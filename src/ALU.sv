@@ -58,28 +58,42 @@ module ALU (
   // ------------------------------------------------------------
   logic [31:0] result_c;
 
+  logic [4:0] shamt_i;
+  logic [4:0] shamt_r;
+
+  assign shamt_i = shamt;        // immediate shift amount (already decoded)
+  assign shamt_r = op_b[4:0];     // register shift amount
+
   always_comb begin
     result_c = 32'b0;
     unique case (b.op)
-      OP_ADD, OP_ADDI, OP_AUIPC: result_c = op_a + op_b;
-      OP_SUB:                   result_c = op_a - op_b;
+      OP_ADD, OP_ADDI, OP_AUIPC:  result_c = op_a + op_b;
+      OP_SUB:                    result_c = op_a - op_b;
 
-      OP_AND, OP_ANDI:          result_c = op_a & op_b;
-      OP_OR,  OP_ORI:           result_c = op_a | op_b;
-      OP_XOR, OP_XORI:          result_c = op_a ^ op_b;
+      OP_AND, OP_ANDI:           result_c = op_a & op_b;
+      OP_OR,  OP_ORI:            result_c = op_a | op_b;
+      OP_XOR, OP_XORI:           result_c = op_a ^ op_b;
 
-      OP_SLL, OP_SLLI:          result_c = op_a << shamt;
-      OP_SRL, OP_SRLI:          result_c = op_a >> shamt;
-      OP_SRA, OP_SRAI:          result_c = $signed(op_a) >>> shamt;
+      // Shifts: immediate vs register forms must use different shift sources
+      OP_SLLI:                   result_c = op_a <<  shamt_i;
+      OP_SLL:                    result_c = op_a <<  shamt_r;
 
-      OP_SLT, OP_SLTI:          result_c = ($signed(op_a) < $signed(op_b)) ? 32'd1 : 32'd0;
-      OP_SLTU, OP_SLTIU:        result_c = (op_a < op_b) ? 32'd1 : 32'd0;
+      OP_SRLI:                   result_c = op_a >>  shamt_i;
+      OP_SRL:                    result_c = op_a >>  shamt_r;
 
-      OP_LUI:                   result_c = op_b;
+      OP_SRAI:                   result_c = $signed(op_a) >>> shamt_i;
+      OP_SRA:                    result_c = $signed(op_a) >>> shamt_r;
 
-      default:                  result_c = 32'b0;
+      // Comparisons: for immediate forms, op_b should already be sign-extended immediate
+      OP_SLT,  OP_SLTI:          result_c = ($signed(op_a) < $signed(op_b)) ? 32'd1 : 32'd0;
+      OP_SLTU, OP_SLTIU:         result_c = (op_a < op_b) ? 32'd1 : 32'd0;
+
+      OP_LUI:                    result_c = op_b;
+
+      default:                   result_c = 32'b0;
     endcase
   end
+
 
   // ------------------------------------------------------------
   // 1-entry output buffer (safe)
@@ -148,7 +162,7 @@ module ALU (
   // assign wb_valid = (out_uop_class_q == UOP_ALU) && out_uses_rd_q;
   //
   // If ALU is only issued ALU-class uops anyway, this is enough:
-  assign wb_valid   = out_uses_rd_q && out_vld_q;
+  assign wb_valid   = out_vld_q;
 
   assign wb_pc      = out_pc_q;
   assign wb_uses_rd = out_uses_rd_q;

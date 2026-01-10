@@ -52,7 +52,7 @@ module ROB #(
      * Recovery (from branch mispredict handling inside ROB)
      * ========================= */
     output logic           recover_valid,
-    output logic [ROB_W_P-1:0] recover_rob_idx,     // ROB idx that caused recovery
+    output logic [ROB_W_P-1:0] recover_cur_rob_idx,     // ROB idx that caused recovery
     output rob_entry_t     recover_entry,         // most-recent allocated entry while recovering (tail-1)
 
     /* =========================
@@ -79,14 +79,14 @@ module ROB #(
     rob_entry_t rob_mem [ROB_SIZE_P];
     logic [ROB_SIZE_P-1:0] rob_br_finished;
 
-    logic [ROB_W_P:0] head_ptr;
-    logic [ROB_W_P:0] tail_ptr;
+    logic [ROB_W_P-1:0] head_ptr;
+    logic [ROB_W_P-1:0] tail_ptr;
     logic [ROB_W_P:0] count;
 
     /* =========================
      * Status / handshakes
      * ========================= */
-    assign alloc_ready = (count < ROB_SIZE_P) && (~recover_valid);
+    assign alloc_ready = (count != ROB_SIZE_P) && (~recover_valid);
     logic commit_fire;
     logic alloc_fire;
     assign commit_fire = commit_valid && commit_ready;
@@ -183,6 +183,13 @@ module ROB #(
                 end
                 default: begin end
             endcase
+        end else if (recover_valid) begin
+            tail_ptr <= tail_ptr - 1'b1;
+            count    <= count - 1'b1;
+            rob_mem[tail_ptr - 1'b1].valid <= 1'b0;
+            rob_mem[tail_ptr - 1'b1].done  <= 1'b0;
+            rob_br_finished[tail_ptr - 1'b1] <= 1'b1;
+            wb_ready <= 1'b0;
         end
     end
 
@@ -223,14 +230,14 @@ module ROB #(
     // "wb mispredict" event (only when the wb matches the ROB entry's epoch)
     logic wb_mispredict_fire;
     assign wb_mispredict_fire =
-        wb_valid &&
+        (wb_valid &&
         wb_pkt.is_branch &&
         rob_mem[wb_pkt.rob_idx].valid &&
         (rob_mem[wb_pkt.rob_idx].epoch == wb_pkt.epoch) &&
-        wb_pkt.mispredict;
+        wb_pkt.mispredict);
 
+    logic [ROB_W_P-1:0] recover_rob_idx;
     logic init_recover_idx;
-
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             current_state  <= NORMAL;
@@ -246,35 +253,29 @@ module ROB #(
         end
     end
 
-    // In recovery, expose the youngest entry (tail-1) so downstream can walk/squash.
     assign recover_entry = rob_mem[tail_ptr - 1'b1];
+    assign recover_cur_rob_idx = tail_ptr - 1'b1;
 
     always_comb begin
-        next_state       = current_state;
-        recover_valid    = 1'b0;
+        next_state = current_state;
+        recover_valid = 1'b0;
         init_recover_idx = 1'b0;
-
-        unique case (current_state)
+        case (current_state)
             NORMAL: begin
                 if (wb_mispredict_fire) begin
-                    next_state       = RECOVERY;
-                    recover_valid    = 1'b1;
+                    next_state = RECOVERY;
                     init_recover_idx = 1'b1;
                 end
             end
             RECOVERY: begin
-                // Stay in recovery until tail has rewound past the mispredicted branch.
-                // External logic is expected to pop/squash younger entries by driving flush_valid
-                // or by otherwise coordinating with your pipeline control.
-                if (tail_ptr == (recover_rob_idx + 1'b1)) begin
+                // stay in recovery until flushed externally
+                if (tail_ptr == recover_rob_idx + 1'b1) begin
                     next_state = NORMAL;
                 end else begin
                     recover_valid = 1'b1;
                 end
             end
-            default: begin
-                next_state = NORMAL;
-            end
+            default: next_state = NORMAL;
         endcase
     end
 

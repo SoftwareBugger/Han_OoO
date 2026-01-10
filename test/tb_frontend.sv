@@ -140,13 +140,14 @@ module tb_fetch;
     input logic mispredict
   );
     begin
-      update_valid = 1'b1;
-      update_pc = pc;
-      update_taken = taken;
-      update_target = target;
-      update_mispredict = mispredict;
       @(posedge clk);
-      update_valid = 1'b0;
+      update_valid <= 1'b1;
+      update_pc <= pc;
+      update_taken <= taken;
+      update_target <= target;
+      update_mispredict <= mispredict;
+      @(posedge clk);
+      update_valid <= 1'b0;
     end
   endtask
 

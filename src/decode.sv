@@ -262,6 +262,9 @@ module decode (
         d.op        = OP_ILLEGAL;
       end
     endcase
+    if (rd == 5'd0) begin
+      d.uses_rd = 1'b0; // rd=x0 means no destination
+    end
   end
 
   // ============================================================
@@ -273,7 +276,8 @@ module decode (
   logic first_inst;
 
   // downstream handshake
-  wire out_deq_fire = out_vld_q && decode_ready;
+  wire out_deq_fire = out_vld_q && (decode_ready || (out_epoch_q != decode_epoch));
+  
 
   // upstream can send if buffer empty or we dequeue this cycle (skid)
   assign fetch_ready  = (!out_vld_q) || out_deq_fire;

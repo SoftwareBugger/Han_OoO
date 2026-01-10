@@ -32,7 +32,7 @@ module branch_predictor (
         logic [1:0]        ctr;    // 2-bit saturating counter (optional but useful)
     } btb_entry_t;
 
-    btb_entry_t btb [BTB_ENTRIES];
+    btb_entry_t btb [BTB_ENTRIES-1:0];
 
     // Index/tag helpers
     logic [BTB_W-1:0]  pred_idx, upd_idx;
@@ -82,35 +82,41 @@ module branch_predictor (
                 btb[i].target <= '0;
                 btb[i].ctr    <= 2'b01; // weakly not-taken
             end
-        end else begin
-            if (update_valid) begin
-                // Option A (simple): always allocate/update entry on any branch update
-                // Option B (common): allocate only if taken OR mispredicted taken
-                // Keep it simple:
-                btb[upd_idx].valid <= 1'b1;
-                btb[upd_idx].tag   <= upd_tag;
+        end else if (update_valid) begin
+            // Option A (simple): always allocate/update entry on any branch update
+            // Option B (common): allocate only if taken OR mispredicted taken
+            // Keep it simple:
+            btb[upd_idx].valid <= 1'b1;
+            btb[upd_idx].tag   <= upd_tag;
 
-                // Target update: usually only meaningful for taken branches/jumps.
-                // But writing always is harmless and simpler.
-                btb[upd_idx].target <= update_target;
+            // Target update: usually only meaningful for taken branches/jumps.
+            // But writing always is harmless and simpler.
+            btb[upd_idx].target <= update_target;
 
-                // Counter update toward truth
-                if (update_taken)
-                    btb[upd_idx].ctr <= (&btb[upd_idx].ctr) ? 2'b11 : btb[upd_idx].ctr + 2'b01;
-                else
-                    btb[upd_idx].ctr <= (|btb[upd_idx].ctr) ? btb[upd_idx].ctr - 2'b01 : 2'b00;
+            // Counter update toward truth
+            if (update_taken)
+                btb[upd_idx].ctr <= (&btb[upd_idx].ctr) ? 2'b11 : btb[upd_idx].ctr + 2'b01;
+            else
+                btb[upd_idx].ctr <= (|btb[upd_idx].ctr) ? btb[upd_idx].ctr - 2'b01 : 2'b00;
 
-                // update_mispredict is not required for correctness here.
-                // If you want, you can make mispredict cause a stronger update:
-                // e.g., set ctr to strong taken/not-taken immediately.
-                // Uncomment if you want "aggressive" training:
-                /*
-                if (update_mispredict) begin
-                    btb[upd_idx].ctr <= update_taken ? 2'b11 : 2'b00;
-                end
-                */
-            end 
+            // update_mispredict is not required for correctness here.
+            // If you want, you can make mispredict cause a stronger update:
+            // e.g., set ctr to strong taken/not-taken immediately.
+            // Uncomment if you want "aggressive" training:
+            /*
+            if (update_mispredict) begin
+                btb[upd_idx].ctr <= update_taken ? 2'b11 : 2'b00;
+            end
+            */
+        end 
+    end
+
+    always_ff @(posedge clk) begin
+        if (update_valid) begin
+            $display("BTB update: pc=%h idx=%h tag=%h target=%h",
+                    update_pc, upd_idx, upd_tag, update_target);
         end
     end
+
 
 endmodule
