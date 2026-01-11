@@ -22,6 +22,7 @@ module CDB (
     input  logic [ROB_W-1:0]  alu_wb_rob_idx,
     input  logic [PHYS_W-1:0] alu_wb_prd_new,
     input  logic [31:0]       alu_wb_data,
+    input  logic [31:0]       alu_wb_pc,
     input  logic [1:0]        alu_wb_epoch,
     input  logic              alu_wb_uses_rd,
 
@@ -53,6 +54,7 @@ module CDB (
     input  logic [31:0]       lsu_wb_data,
     input  logic [1:0]        lsu_wb_epoch,
     input  logic              lsu_wb_uses_rd,
+    input  logic [31:0]       lsu_wb_pc,
 
     // Optional LSU info (tie off to 0 if unused)
     input  logic              lsu_is_load,
@@ -151,6 +153,7 @@ module CDB (
                 wb_pkt.is_store    = lsu_is_store;
                 wb_pkt.mem_exc     = lsu_mem_exc;
                 wb_pkt.mem_addr    = lsu_mem_addr;
+                wb_pkt.pc          = lsu_wb_pc;
             end
 
             SEL_ALU: begin
@@ -178,6 +181,7 @@ module CDB (
                 wb_pkt.is_store    = 1'b0;
                 wb_pkt.mem_exc     = 1'b0;
                 wb_pkt.mem_addr    = 32'b0;
+                wb_pkt.pc          = alu_wb_pc;
             end
 
             default: begin

@@ -82,7 +82,7 @@ module commit_rename #(
 
     // Free logic: recovery frees pd_new (wrong allocation), commit frees pd_old (replaced mapping)
     assign i_free_list_free_pd = recover_valid ? recover_entry.pd_new : commit_entry.pd_old;
-    assign i_free_list_free_valid = (commit_valid && commit_entry.uses_rd && commit_ready) || recover_valid;
+    assign i_free_list_free_valid = (commit_valid && commit_entry.uses_rd && commit_ready) || (recover_valid && recover_entry.uses_rd);
     
     // Allocation logic: only allocate when not in recovery and instruction uses rd
     // Also check that freelist is ready to avoid allocating when no physical registers available
@@ -165,7 +165,7 @@ module commit_rename #(
         /* =========================
         * Recovery (from ROB)
         * ========================= */
-        .recover_valid      (recover_valid),
+        .recover_valid      (recover_valid && recover_entry.uses_rd),
         .recover_pd         (recover_entry.pd_old),
         .recover_rd_arch    (recover_entry.rd_arch)
     );

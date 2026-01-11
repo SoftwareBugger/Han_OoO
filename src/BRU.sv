@@ -84,10 +84,11 @@ module BRU (
       mispredict_c = 1'b1;
     end else if (act_taken_c && (target_pc_c != req_uop.bundle.pred_target)) begin
       mispredict_c = 1'b1;
-    end else if (req_uop.bundle.uop_class == UOP_JUMP) begin
-      // Always treat jumps as mispredicts to force redirection
-      mispredict_c = 1'b1;
     end
+    // end else if (req_uop.bundle.uop_class == UOP_JUMP) begin
+    //   // Always treat jumps as mispredicts to force redirection
+    //   mispredict_c = 1'b1;
+    // end
   end
 
   always_comb begin

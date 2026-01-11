@@ -146,7 +146,7 @@ module tb_cpu_core;
     do_reset();
 
     // Run bounded time if no explicit done condition yet
-    repeat (200000) @(posedge clk);
+    repeat (20000000) @(posedge clk);
 
     $display("TIMEOUT: no finish condition hit");
     $fclose(tf_wb);
@@ -213,7 +213,7 @@ module tb_cpu_core;
         cycles_since_commit <= 0;
 
         $fwrite(tf_commit,
-          "{\"type\":\"commit\",\"cycle\":%0d,\"commit_rob\":%0d,\"global_epoch\":%0d,\"valid\":%0d,\"done\":%0d,\"epoch\":%0d,\"uses_rd\":%0d,\"rd_arch\":%0d,\"pd_new\":\"0x%0x\",\"pd_old\":\"0x%0x\",\"is_branch\":%0d,\"mispredict\":%0d,\"is_load\":%0d,\"is_store\":%0d,\"pc\":\"0x%08x\"}\n",
+          "{\"type\":\"commit\",\"cycle\":%0d,\"commit_rob\":%0d,\"global_epoch\":%0d,\"valid\":%0d,\"done\":%0d,\"epoch\":%0d,\"uses_rd\":%0d,\"rd_arch\":%0d,\"pd_new\":\"0x%0x\",\"pd_old\":\"0x%0x\",\"is_branch\":%0d,\"mispredict\":%0d,\"is_load\":%0d,\"is_store\":%0d,\"pc\":\"0x%08x\",\"data\":\"0x%08x\"}\n",
           cycle,
           dut.commit_rob_idx,
           dut.global_epoch,
@@ -228,10 +228,11 @@ module tb_cpu_core;
           dut.commit_entry.mispredict,
           dut.commit_entry.is_load,
           dut.commit_entry.is_store,
-          dut.commit_entry.pc
+          dut.commit_entry.pc,
+          dut.commit_entry.uses_rd ? dut.prf_inst.mem[dut.commit_entry.pd_new] : 0
         );
 
-        if (commits > 50000) begin
+        if (commits > 5000000) begin
           $display("Stopping: commit limit reached");
           $finish;
         end

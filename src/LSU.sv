@@ -55,6 +55,7 @@ module LSU (
     output logic [1:0]       wb_epoch,
     output logic [ROB_W-1:0]  wb_rob_idx,
     output logic [PHYS_W-1:0] wb_prd_new,
+    output logic [31:0]       wb_pc,
     output logic [31:0] wb_data
 );
 
@@ -204,6 +205,7 @@ module LSU (
     logic [1:0]        wb_buf_epoch;
     logic        wb_buf_uses_rd;
     logic        wb_fire;
+    logic [31:0] wb_buf_pc;
 
     // ============================================================
     // SQ always_ff (UNCHANGED LOGIC; only depends on ld_busy/wb_buf_valid clears)
@@ -433,6 +435,7 @@ module LSU (
                     ld_req_prd     <= req_uop[1].prd_new;
                     ld_req_epoch   <= req_uop[1].epoch;
                 end
+                wb_buf_pc <= req_uop[1].bundle.pc;
             end else if (ld_req_valid && dmem.ld_ready) begin
                 // Request accepted by memory, clear holding register
                 ld_req_valid <= 1'b0;
@@ -513,6 +516,7 @@ module LSU (
             wb_buf_prd_new <= '0;
             wb_buf_epoch <= '0;
             wb_buf_uses_rd <= 1'b0;
+            wb_buf_pc <= 32'b0;
         end else if (flush_valid || recover_valid) begin
             wb_buf_valid <= 1'b0;
         end else begin
@@ -531,6 +535,7 @@ module LSU (
                     wb_buf_epoch   <= ld_epoch_q;
                 end
                 wb_buf_uses_rd <= 1'b1;
+
             end else if (wb_fire) begin
                 wb_buf_valid <= 1'b0;
             end
@@ -549,6 +554,7 @@ module LSU (
     assign wb_prd_new = wb_buf_prd_new;
     assign wb_epoch   = wb_buf_epoch;
     assign wb_uses_rd = wb_buf_uses_rd;
+    assign wb_pc      = wb_buf_pc;
 
     
 

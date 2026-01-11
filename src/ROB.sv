@@ -91,6 +91,7 @@ module ROB #(
     logic alloc_fire;
     assign commit_fire = commit_valid && commit_ready;
     assign alloc_fire  = alloc_valid && alloc_ready;
+    assign wb_ready    = ~(recover_valid || flush_valid);
 
     /* =========================
      * ROB Update Logic
@@ -103,7 +104,6 @@ module ROB #(
             for (int i = 0; i < ROB_SIZE_P; i++) begin
                 rob_mem[i] <= '0;
             end
-            wb_ready <= 1'b1;
             rob_br_finished <= '1;
         end else if (flush_valid) begin
             head_ptr <= '0;
@@ -114,12 +114,10 @@ module ROB #(
                 rob_mem[i].done  <= 1'b0;
             end
             rob_br_finished <= '1;
-            wb_ready <= 1'b1;
         end else if (~recover_valid) begin
             // =====================
             // Writeback
             // =====================
-            wb_ready <= 1'b1;
             if (wb_valid) begin
                 if (rob_mem[wb_pkt.rob_idx].valid &&
                     rob_mem[wb_pkt.rob_idx].epoch == wb_pkt.epoch) begin
@@ -189,7 +187,6 @@ module ROB #(
             rob_mem[tail_ptr - 1'b1].valid <= 1'b0;
             rob_mem[tail_ptr - 1'b1].done  <= 1'b0;
             rob_br_finished[tail_ptr - 1'b1] <= 1'b1;
-            wb_ready <= 1'b0;
         end
     end
 
@@ -204,9 +201,8 @@ module ROB #(
     assign commit_valid =
         (count != 0) &&
         rob_mem[head_ptr].valid &&
-        rob_mem[head_ptr].done &&
         (!recover_valid) &&
-        (rob_mem[head_ptr].is_store ? (&rob_br_finished) : 1'b1);
+        (rob_mem[head_ptr].is_store ? (&rob_br_finished) : rob_mem[head_ptr].done);
 
     // Compact commit payload
     always_comb begin

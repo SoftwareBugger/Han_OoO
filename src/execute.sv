@@ -179,6 +179,7 @@ module execute (
     logic [31:0]       alu_wb_pc;
     logic              alu_wb_uses_rd;
     logic [31:0]       alu_wb_data;
+    logic [31:0]       alu_wb_pc;
 
     ALU alu (
         .clk(clk),
@@ -329,6 +330,7 @@ module execute (
     logic [ROB_W-1:0]  lsu_wb_rob_idx;
     logic [PHYS_W-1:0] lsu_wb_prd_new;
     logic [31:0]       lsu_wb_data;
+    logic [31:0]       lsu_wb_pc;
 
     LSU lsu_u (
         .clk               (clk),
@@ -376,6 +378,7 @@ module execute (
         .wb_epoch          (lsu_wb_epoch),
         .wb_rob_idx        (lsu_wb_rob_idx),
         .wb_prd_new        (lsu_wb_prd_new),
+        .wb_pc             (lsu_wb_pc),
         .wb_data           (lsu_wb_data)
     );
 
@@ -394,6 +397,7 @@ module execute (
         .alu_wb_data       (alu_wb_data),
         .alu_wb_epoch      (alu_wb_epoch),
         .alu_wb_uses_rd    (alu_wb_uses_rd),
+        .alu_wb_pc         (alu_wb_pc),
 
         // BRU writeback
         .bru_wb_valid      (bru_wb_valid),
@@ -419,6 +423,7 @@ module execute (
         .lsu_wb_data       (lsu_wb_data),
         .lsu_wb_epoch      (lsu_wb_epoch),
         .lsu_wb_uses_rd    (lsu_wb_uses_rd),
+        .lsu_wb_pc         (lsu_wb_pc),
 
         // To ROB + PRF
         .wb_valid          (wb_valid),
