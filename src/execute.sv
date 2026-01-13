@@ -108,37 +108,45 @@ module execute (
     // RS → FU Issue Pipeline (1-entry elastic buffer per FU)
     // =======================================================
 
-    logic [FU_NUM-1:0] fu_req_valid;
-    logic [FU_NUM-1:0] fu_req_ready;
+    logic fu_req_valid [FU_NUM-1:0] ;
+    logic fu_req_ready [FU_NUM-1:0];
     rs_uop_t           fu_req_uop [FU_NUM-1:0];
 
-    logic [FU_NUM-1:0] pipe_v;
+    logic pipe_v [FU_NUM-1:0];
     rs_uop_t           pipe_uop [FU_NUM-1:0];
 
-    for (genvar i = 0; i < FU_NUM; i++) begin
-        // RS sees ready if pipeline empty or popping this cycle
-        assign issue_ready[i] = ~pipe_v[i] || fu_req_ready[i];
-
-        // FU sees what is in the pipe
-        assign fu_req_valid[i] = pipe_v[i];
-        assign fu_req_uop[i]   = pipe_uop[i];
-    end
+    logic  pop [FU_NUM-1:0];
+    logic  push [FU_NUM-1:0];
+    genvar i;
+    generate
+        for (i = 0; i < FU_NUM; i++) begin
+            // FU sees what is in the pipe
+            assign fu_req_valid[i] = pipe_v[i];
+            assign fu_req_uop[i]   = pipe_uop[i];
+            // RS sees ready if pipeline empty or popping this cycle
+            // Pipeline push/pop logic
+            assign pop[i]  = (fu_req_ready[i] & pipe_v[i]);
+            assign issue_ready[i] = (~pipe_v[i] | pop[i]);
+            assign push[i] = (issue_valid[i] & issue_ready[i]);
+        end
+    endgenerate
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            pipe_v <= '0;
+            for (int i = 0; i < FU_NUM; i++) begin
+                pipe_v[i] <= 1'b0;
+                pipe_uop[i] <= '0;
+            end
         end else begin
             // Kill all issued-but-not-executed ops on flush or recovery
-            if (flush_valid || recover_valid) begin
-                pipe_v <= '0;
+            if (flush_valid) begin
+                for (int i = 0; i < FU_NUM; i++) begin
+                    pipe_v[i] <= 1'b0;
+                    pipe_uop[i] <= '0;
+                end
             end else begin
                 for (int i = 0; i < FU_NUM; i++) begin
-                    logic push, pop;
-
-                    push = issue_valid[i] && issue_ready[i];
-                    pop  = fu_req_valid[i] && fu_req_ready[i];
-
-                    unique case ({push, pop})
+                    unique case ({push[i], pop[i]})
                         2'b10: begin // push
                             pipe_v[i]   <= 1'b1;
                             pipe_uop[i] <= issue_uop[i];
@@ -150,7 +158,11 @@ module execute (
                             pipe_v[i]   <= 1'b1;
                             pipe_uop[i] <= issue_uop[i];
                         end
-                        default: begin end
+                        default: begin 
+                            // hold
+                            pipe_v[i]   <= pipe_v[i];
+                            pipe_uop[i] <= pipe_uop[i];
+                        end
                     endcase
                 end
             end

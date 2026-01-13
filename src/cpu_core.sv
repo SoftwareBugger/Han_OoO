@@ -57,6 +57,7 @@ module cpu_core (
     /* =========================
      * Recovery signals
      * ========================= */
+    logic wb_mispredict_fire;
     logic recover_valid;
     logic [ROB_W-1:0] recover_rob_idx;
     rob_entry_t recover_entry;
@@ -170,7 +171,7 @@ module cpu_core (
         .rst_n(rst_n),
 
         // Allocation from fetch/decode (filtered by fetch_epoch)
-        .alloc_valid(decode_valid),
+        .alloc_valid(decode_valid && decode_ready),
         .alloc_ready(decode_ready_rob),
         .alloc_bundle(decoded_bundle),
         .alloc_rob_idx(alloc_rob_idx),
@@ -200,6 +201,7 @@ module cpu_core (
         .rd_new_phys(rd_new_phys),
 
         // Recovery from branch mispredict
+        .wb_mispredict_fire(wb_mispredict_fire),
         .recover_valid(recover_valid),
         .recover_rob_idx(recover_rob_idx),
         .recover_entry(recover_entry),
@@ -356,7 +358,7 @@ module cpu_core (
 
     // Redirect on branch mispredict from writeback
     // Note: Recovery signal comes from ROB, but redirect happens immediately on WB
-    assign redirect_valid = bru_mispredict;
+    assign redirect_valid = wb_pkt.redirect && wb_mispredict_fire;
     assign redirect_pc = wb_pkt.redirect_pc;
 
     // Flush on recovery (triggered by mispredict writeback)
@@ -366,7 +368,7 @@ module cpu_core (
     assign flush_epoch = global_epoch;
 
     // Update predictor on branch writeback
-    assign update_valid = wb_valid && wb_pkt.is_branch;
+    assign update_valid = wb_valid && wb_ready && wb_pkt.is_branch;
     assign update_pc = wb_pkt.pc;  // Get PC from ROB entry
     assign update_taken = wb_pkt.act_taken;
     assign update_target = wb_pkt.redirect_pc;

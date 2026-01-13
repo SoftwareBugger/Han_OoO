@@ -568,13 +568,13 @@ def simulate_commit_trace(words: List[int], meta: List[Meta], asm: List[str],
             rd_data = 1 if u32(r(rs1)) < u32(sext(imm, 12)) else 0
             
         elif op == "XORI":
-            rd_data = u32(r(rs1) ^ (imm & 0xFFF))
+            rd_data = u32(r(rs1) ^ sext(imm, 12))
             
         elif op == "ORI":
-            rd_data = u32(r(rs1) | (imm & 0xFFF))
+            rd_data = u32(r(rs1) | sext(imm, 12))
             
         elif op == "ANDI":
-            rd_data = u32(r(rs1) & (imm & 0xFFF))
+            rd_data = u32(r(rs1) & sext(imm, 12))
             
         elif op == "SLLI":
             rd_data = u32(r(rs1) << (imm & 0x1F))
@@ -1184,6 +1184,885 @@ def prog_mem_endian_overlay(a: Asm):
 
 
 
+
+
+# ==========================================
+# ADVANCED RV32I TESTS - Add these to your TESTS dict
+# ==========================================
+
+def prog_raw_data_hazards(a: Asm):
+    """Test RAW (Read-After-Write) data hazards - critical for OOO"""
+    a.init_test()
+    
+    # Back-to-back dependency chain
+    a.addi(1, 0, 10)
+    a.addi(2, 1, 5)    # RAW on x1
+    a.addi(3, 2, 3)    # RAW on x2
+    a.addi(4, 3, 2)    # RAW on x3
+    a.check_reg(4, 20, 0)
+    
+    # Multiple consumers of same producer
+    a.addi(5, 0, 100)
+    a.add(6, 5, 5)     # RAW on x5
+    a.sub(7, 5, 6)     # RAW on x5 and x6
+    a._xor(8, 5, 7)    # RAW on x5 and x7
+    a.check_reg(6, 200, 1)
+    a.check_reg(7, -100 & 0xFFFFFFFF, 2)
+    
+    # Long dependency chain with different ops
+    a.addi(10, 0, 1)
+    a.slli(11, 10, 4)   # 16
+    a.add(12, 11, 10)   # 17
+    a.sub(13, 12, 11)   # 1
+    a._or(14, 13, 12)   # 17
+    a.check_reg(14, 17, 3)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_war_waw_hazards(a: Asm):
+    """Test WAR (Write-After-Read) and WAW (Write-After-Write) hazards"""
+    a.init_test()
+    
+    # WAR hazard pattern
+    a.addi(1, 0, 50)
+    a.addi(2, 0, 30)
+    a.add(3, 1, 2)     # Read x1, x2
+    a.addi(1, 0, 999)  # Write x1 (WAR with previous read)
+    a.check_reg(3, 80, 0)
+    a.check_reg(1, 999, 1)
+    
+    # WAW hazard pattern
+    a.addi(4, 0, 100)  # First write to x4
+    a.addi(4, 0, 200)  # Second write to x4 (WAW)
+    a.addi(4, 0, 300)  # Third write to x4 (WAW)
+    a.check_reg(4, 300, 2)
+    
+    # Complex RAW/WAR/WAW mix
+    a.addi(5, 0, 10)
+    a.add(6, 5, 5)     # RAW on x5
+    a.addi(5, 0, 20)   # WAW on x5, WAR with first add
+    a.add(7, 5, 6)     # RAW on new x5 and x6
+    a.check_reg(5, 20, 3)
+    a.check_reg(6, 20, 4)
+    a.check_reg(7, 40, 5)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_load_use_hazard(a: Asm):
+    """Test load-use hazards (load followed immediately by use)"""
+    a.init_test()
+    
+    a.li(20, 0x00000100, "mem base")
+    
+    # Store some values
+    a.li(1, 0x12345678)
+    a.sw(1, 20, 0)
+    a.li(2, 0xABCDEF00)
+    a.sw(2, 20, 4)
+    
+    # Load-use hazard: load followed immediately by dependent instruction
+    a.lw(3, 20, 0)     # Load
+    a.add(4, 3, 3)     # Use immediately (load-use hazard)
+    a.check_reg(4, 0x2468ACF0, 0)
+    
+    # Load-load-use pattern
+    a.lw(5, 20, 0)
+    a.lw(6, 20, 4)
+    a.add(7, 5, 6)     # Use both loads
+    a.check_reg(7, 0xBE024578, 1)
+    
+    # Load-branch hazard
+    a.li(8, 42)
+    a.sw(8, 20, 8)
+    a.lw(9, 20, 8)
+    a.addi(10, 0, 42)
+    a.beq(9, 10, "LOAD_BR_OK")
+    a.addi(11, 0, 999)  # poison
+    a.jal(0, "LOAD_BR_END")
+    a.label("LOAD_BR_OK")
+    a.addi(11, 0, 123)
+    a.label("LOAD_BR_END")
+    a.check_reg(11, 123, 2)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_store_load_forwarding(a: Asm):
+    """Test store-to-load forwarding and aliasing"""
+    a.init_test()
+    
+    a.li(20, 0x00000100, "mem base")
+    
+    # Basic store-load forwarding (same address)
+    a.li(1, 0xCAFEBABE)
+    a.sw(1, 20, 0)
+    a.lw(2, 20, 0)     # Should get forwarded value
+    a.check_reg(2, 0xCAFEBABE, 0)
+    
+    # Partial forwarding: store byte, load word
+    a.li(3, 0xFF)
+    a.sb(3, 20, 0)     # Only modify byte 0
+    a.lw(4, 20, 0)     # Load full word
+    a.check_reg(4, 0xCAFEBAFF, 1)
+    
+    # Store-load with offset
+    a.li(5, 0x11223344)
+    a.sw(5, 20, 12)
+    a.lw(6, 20, 12)
+    a.check_reg(6, 0x11223344, 2)
+    
+    # Multiple stores to different addresses
+    a.li(7, 0xAAAAAAAA)
+    a.li(8, 0xBBBBBBBB)
+    a.sw(7, 20, 16)
+    a.sw(8, 20, 20)
+    a.lw(9, 20, 16)
+    a.lw(10, 20, 20)
+    a.check_reg(9, 0xAAAAAAAA, 3)
+    a.check_reg(10, 0xBBBBBBBB, 4)
+    
+    # Store halfword, load word (overlapping)
+    a.li(11, 0x0)
+    a.sw(11, 20, 24)
+    a.li(12, 0xCCDD)
+    a.sh(12, 20, 24)
+    a.lw(13, 20, 24)
+    a.check_reg(13, 0x0000CCDD, 5)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_memory_aliasing(a: Asm):
+    """Test memory aliasing and address calculation edge cases"""
+    a.init_test()
+    
+    a.li(20, 0x00000100, "mem base")
+    
+    # Positive and negative offsets
+    a.li(1, 0x12345678)
+    a.sw(1, 20, 100)
+    a.lw(2, 20, 100)
+    a.check_reg(2, 0x12345678, 0)
+    
+    # Same address via different base+offset
+    a.addi(21, 20, 50)   # x21 = base + 50
+    a.li(3, 0xABCDEF01)
+    a.sw(3, 21, 50)      # Store to base+100 via (base+50)+50
+    a.lw(4, 20, 100)     # Load from base+100 via base+100
+    a.check_reg(4, 0xABCDEF01, 1)
+    
+    # Negative offset
+    a.addi(22, 20, 200)  # x22 = base + 200
+    a.li(5, 0xFEEDFACE)
+    a.sw(5, 22, -100)    # Store to base+100 via (base+200)-100
+    a.lw(6, 20, 100)
+    a.check_reg(6, 0xFEEDFACE, 2)
+    
+    # Sign extension of offset
+    a.li(7, 0x99887766)
+    a.sw(7, 20, -4)      # Negative offset with sign extension
+    a.lw(8, 20, -4)
+    a.check_reg(8, 0x99887766, 3)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_branch_prediction_stress(a: Asm):
+    """Stress test for branch prediction"""
+    a.init_test()
+    
+    # Alternating taken/not-taken pattern
+    a.addi(1, 0, 0)
+    a.addi(2, 0, 0)  # counter
+    a.addi(3, 0, 8)  # limit
+    
+    a.label("ALT_LOOP")
+    a.andi(4, 2, 1)  # x4 = counter & 1
+    a.beq(4, 0, "ALT_SKIP")  # Branch if even
+    a.addi(1, 1, 10)
+    a.label("ALT_SKIP")
+    a.addi(2, 2, 1)
+    a.bne(2, 3, "ALT_LOOP")
+    
+    # Should execute 4 times (when counter is odd)
+    a.check_reg(1, 40, 0)
+    
+    # Always taken loop
+    a.addi(5, 0, 0)
+    a.addi(6, 0, 0)
+    a.addi(7, 0, 10)
+    a.label("TAKEN_LOOP")
+    a.addi(5, 5, 1)
+    a.addi(6, 6, 1)
+    a.bne(6, 7, "TAKEN_LOOP")  # Always taken until last
+    a.check_reg(5, 10, 1)
+    
+    # Never taken branches
+    a.addi(8, 0, 100)
+    a.beq(8, 0, "NEVER1")
+    a.blt(8, 0, "NEVER2")
+    a.addi(9, 0, 200)
+    a.jal(0, "NEVER_END")
+    a.label("NEVER1")
+    a.label("NEVER2")
+    a.addi(9, 0, 999)  # poison
+    a.label("NEVER_END")
+    a.check_reg(9, 200, 2)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_deeply_nested_calls(a: Asm):
+    """Test deeply nested function calls (JAL/JALR)"""
+    a.init_test()
+    
+    # Simulated call stack using registers
+    a.addi(10, 0, 0)  # result accumulator
+    
+    # Call chain: main -> f1 -> f2 -> f3 -> f4
+    a.jal(1, "F1")
+    a.addi(10, 10, 1)  # Back in main
+    a.jal(0, "END_CALLS")
+    
+    a.label("F1")
+    a.addi(10, 10, 10)
+    a.addi(2, 1, 0)    # Save return addr
+    a.jal(1, "F2")
+    a.addi(10, 10, 100)
+    a.jalr(0, 2, 0)    # Return to main
+    
+    a.label("F2")
+    a.addi(10, 10, 20)
+    a.addi(3, 1, 0)    # Save return addr
+    a.jal(1, "F3")
+    a.addi(10, 10, 200)
+    a.jalr(0, 3, 0)    # Return to F1
+    
+    a.label("F3")
+    a.addi(10, 10, 30)
+    a.addi(4, 1, 0)
+    a.jal(1, "F4")
+    a.addi(10, 10, 300)
+    a.jalr(0, 4, 0)    # Return to F2
+    
+    a.label("F4")
+    a.addi(10, 10, 40)
+    a.jalr(0, 1, 0)    # Return to F3
+    
+    a.label("END_CALLS")
+    # Expected: 10 + 20 + 30 + 40 + 300 + 200 + 100 + 1 = 701
+    a.check_reg(10, 701, 0)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_register_pressure(a: Asm):
+    """Test high register pressure (use all registers)"""
+    a.init_test()
+    
+    # Initialize all registers (except x0, x28-x31 which are used by check_reg)
+    for i in range(1, 28):
+        a.addi(i, 0, i * 10)
+    
+    # Check a few
+    a.check_reg(1, 10, 0)
+    a.check_reg(10, 100, 1)
+    a.check_reg(27, 270, 2)
+    
+    # Perform operations using many registers
+    a.add(1, 2, 3)    # x1 = 20 + 30 = 50
+    a.add(4, 5, 6)    # x4 = 50 + 60 = 110
+    a.add(7, 8, 9)    # x7 = 80 + 90 = 170
+    a.add(10, 1, 4)   # x10 = 50 + 110 = 160
+    a.add(11, 7, 10)  # x11 = 170 + 160 = 330
+    
+    a.check_reg(11, 330, 3)
+    
+    # Chain using many registers
+    a.add(12, 13, 14)  # 130 + 140 = 270
+    a.add(15, 16, 17)  # 160 + 170 = 330
+    a.add(18, 12, 15)  # 270 + 330 = 600
+    a.check_reg(18, 600, 4)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_arithmetic_edge_cases(a: Asm):
+    """Test arithmetic edge cases and overflow"""
+    a.init_test()
+    
+    # Maximum positive + 1 = minimum negative (2's complement)
+    a.li(1, 0x7FFFFFFF)
+    a.addi(2, 1, 1)
+    a.check_reg(2, 0x80000000, 0)
+    
+    # Minimum negative - 1 = maximum positive
+    a.li(3, 0x80000000)
+    a.addi(4, 3, -1)
+    a.check_reg(4, 0x7FFFFFFF, 1)
+    
+    # Zero - zero = zero
+    a.sub(5, 0, 0)
+    a.check_reg(5, 0, 2)
+    
+    # Max unsigned + max unsigned
+    a.li(6, 0xFFFFFFFF)
+    a.add(7, 6, 6)
+    a.check_reg(7, 0xFFFFFFFE, 3)
+    
+    # Multiply by 2 using shift vs add
+    a.li(8, 123456)
+    a.slli(9, 8, 1)
+    a.add(10, 8, 8)
+    a.check_reg(9, 246912, 4)
+    a.check_reg(10, 246912, 5)
+    
+    # Division by 2 using shift (arithmetic)
+    a.li(11, -100)
+    a.srai(12, 11, 1)
+    a.check_reg(12, -50 & 0xFFFFFFFF, 6)
+    
+    # Signed vs unsigned comparison edge
+    a.li(13, 0xFFFFFFFF)  # -1 signed, max unsigned
+    a.li(14, 0)
+    a.slt(15, 13, 14)     # -1 < 0 signed? Yes
+    a.sltu(16, 13, 14)    # max < 0 unsigned? No
+    a.check_reg(15, 1, 7)
+    a.check_reg(16, 0, 8)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_shift_edge_cases(a: Asm):
+    """Comprehensive shift edge case testing"""
+    a.init_test()
+    
+    # Shift by 0
+    a.li(1, 0x12345678)
+    a.slli(2, 1, 0)
+    a.srli(3, 1, 0)
+    a.srai(4, 1, 0)
+    a.check_reg(2, 0x12345678, 0)
+    a.check_reg(3, 0x12345678, 1)
+    a.check_reg(4, 0x12345678, 2)
+    
+    # Shift by 31 (maximum)
+    a.li(5, 1)
+    a.slli(6, 5, 31)
+    a.check_reg(6, 0x80000000, 3)
+    
+    a.srli(7, 6, 31)
+    a.check_reg(7, 1, 4)
+    
+    a.srai(8, 6, 31)  # Arithmetic shift of negative
+    a.check_reg(8, 0xFFFFFFFF, 5)
+    
+    # Variable shift with upper bits set (should be masked to 5 bits)
+    a.li(9, 0x12345678)
+    a.li(10, 32)      # Should be masked to 0
+    a.sll(11, 9, 10)
+    a.check_reg(11, 0x12345678, 6)
+    
+    a.li(12, 33)      # Should be masked to 1
+    a.sll(13, 9, 12)
+    a.slli(14, 9, 1)
+    a.check_reg(13, 0x2468ACF0, 7)
+    a.check_reg(14, 0x2468ACF0, 8)
+    
+    # Shift pattern recognition
+    a.li(15, 0xAAAAAAAA)
+    a.srli(16, 15, 1)
+    a.check_reg(16, 0x55555555, 9)
+    
+    # Arithmetic vs logical right shift
+    a.li(17, 0x80000001)
+    a.srli(18, 17, 1)  # Logical: 0x40000000
+    a.srai(19, 17, 1)  # Arithmetic: 0xC0000000
+    a.check_reg(18, 0x40000000, 10)
+    a.check_reg(19, 0xC0000000, 11)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_bitwise_patterns(a: Asm):
+    """Test bitwise operations with various patterns"""
+    a.init_test()
+    
+    # De Morgan's Laws: NOT(A AND B) = NOT(A) OR NOT(B)
+    a.li(1, 0xAAAAAAAA)
+    a.li(2, 0x55555555)
+    a._and(3, 1, 2)
+    a.xori(4, 3, 0xFFF)  # Invert lower 12 bits
+    a.check_reg(3, 0, 0)
+    
+    # XOR with self = 0
+    a._xor(5, 1, 1)
+    a.check_reg(5, 0, 1)
+    
+    # XOR twice = identity
+    a.li(6, 0x12345678)
+    a.li(7, 0xABCDEF00)
+    a._xor(8, 6, 7)
+    a._xor(9, 8, 7)
+    a.check_reg(9, 0x12345678, 2)
+    
+    # Bit masking patterns
+    a.li(10, 0xFFFFFFFF)
+    a.andi(11, 10, 0xFF)  # Extract low byte
+    a.check_reg(11, 0xFF, 3)
+    
+    a.li(12, 0x12345678)
+    a.andi(13, 12, 0xF00)  # Extract specific bits
+    a.check_reg(13, 0x600, 4)
+    
+    # Set/clear/toggle bits
+    a.li(14, 0x00000000)
+    a.ori(15, 14, 0x0F0)   # Set bits
+    a.check_reg(15, 0x0F0, 5)
+    
+    a.andi(16, 15, 0xFF0)  # Clear low nibble
+    a.check_reg(16, 0x0F0, 6)
+    
+    a.xori(17, 16, 0x0FF)  # Toggle bits
+    a.check_reg(17, 0x00F, 7)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_immediate_edge_cases(a: Asm):
+    """Test immediate value edge cases"""
+    a.init_test()
+    
+    # Maximum positive 12-bit immediate (2047)
+    a.addi(1, 0, 2047)
+    a.check_reg(1, 2047, 0)
+    
+    # Minimum negative 12-bit immediate (-2048)
+    a.addi(2, 0, -2048)
+    a.check_reg(2, 0xFFFFF800, 1)
+    
+    # -1 immediate
+    a.addi(3, 0, -1)
+    a.check_reg(3, 0xFFFFFFFF, 2)
+    
+    # Zero immediate
+    a.addi(4, 0, 0)
+    a.check_reg(4, 0, 3)
+    
+    # LUI with max 20-bit immediate
+    a.lui(5, 0xFFFFF)
+    a.check_reg(5, 0xFFFFF000, 4)
+    
+    # LUI with sign bit set
+    a.lui(6, 0x80000)
+    a.check_reg(6, 0x80000000, 5)
+    
+    # SLTI with edge values
+    a.li(7, -1)
+    a.slti(8, 7, 0)
+    a.check_reg(8, 1, 6)  # -1 < 0
+    
+    a.slti(9, 0, -1)
+    a.check_reg(9, 0, 7)  # 0 < -1? No
+    
+    # SLTIU with max unsigned
+    a.li(10, 0xFFFFFFFF)
+    a.sltiu(11, 10, -1)  # Compare with sign-extended -1 (0xFFFFFFFF)
+    a.check_reg(11, 0, 8)  # Equal, not less
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_memory_boundary(a: Asm):
+    """Test memory access at boundaries"""
+    a.init_test()
+    
+    a.li(20, 0x00000100, "mem base")
+    
+    # Word-aligned accesses
+    a.li(1, 0x11111111)
+    a.sw(1, 20, 0)
+    a.li(2, 0x22222222)
+    a.sw(2, 20, 4)
+    a.li(3, 0x33333333)
+    a.sw(3, 20, 8)
+    
+    # Verify alignment
+    a.lw(4, 20, 0)
+    a.lw(5, 20, 4)
+    a.lw(6, 20, 8)
+    a.check_reg(4, 0x11111111, 0)
+    a.check_reg(5, 0x22222222, 1)
+    a.check_reg(6, 0x33333333, 2)
+    
+    # Halfword at boundaries
+    a.li(7, 0xAAAA)
+    a.sh(7, 20, 12)
+    a.sh(7, 20, 14)
+    a.lhu(8, 20, 12)
+    a.lhu(9, 20, 14)
+    a.check_reg(8, 0xAAAA, 3)
+    a.check_reg(9, 0xAAAA, 4)
+    
+    # Bytes at word boundaries
+    a.li(10, 0xFF)
+    a.sb(10, 20, 16)
+    a.sb(10, 20, 17)
+    a.sb(10, 20, 18)
+    a.sb(10, 20, 19)
+    a.lw(11, 20, 16)
+    a.check_reg(11, 0xFFFFFFFF, 5)
+    
+    # Large offset
+    a.li(12, 0xBEEFCAFE)
+    a.sw(12, 20, 2044)  # Near max 12-bit offset
+    a.lw(13, 20, 2044)
+    a.check_reg(13, 0xBEEFCAFE, 6)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_long_dependency_chain(a: Asm):
+    """Very long dependency chain to stress OOO scheduler"""
+    a.init_test()
+    
+    # Create a chain of 20 dependent instructions
+    a.addi(1, 0, 1)
+    for i in range(2, 22):
+        a.addi(i, i-1, 1)
+    
+    # x21 should be 21
+    a.check_reg(21, 21, 0)
+    
+    # Fibonacci-like sequence
+    a.addi(1, 0, 1)
+    a.addi(2, 0, 1)
+    a.add(3, 1, 2)   # 2
+    a.add(4, 2, 3)   # 3
+    a.add(5, 3, 4)   # 5
+    a.add(6, 4, 5)   # 8
+    a.add(7, 5, 6)   # 13
+    a.add(8, 6, 7)   # 21
+    a.add(9, 7, 8)   # 34
+    a.add(10, 8, 9)  # 55
+    a.check_reg(10, 55, 1)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_mixed_operations_stress(a: Asm):
+    """Mix all operation types to stress issue logic"""
+    a.init_test()
+    
+    a.li(20, 0x00000200, "mem base")
+    
+    # Rapid switching between ALU, load, store, branch
+    a.addi(1, 0, 10)
+    a.sw(1, 20, 0)
+    a.addi(2, 1, 5)
+    a.lw(3, 20, 0)
+    a.add(4, 2, 3)
+    a.check_reg(4, 25, 0)
+    
+    a.slli(5, 4, 2)
+    a.sw(5, 20, 4)
+    a._xor(6, 4, 5)
+    a.lw(7, 20, 4)
+    a.check_reg(7, 100, 1)
+    
+    # Mix with branches
+    a.beq(6, 6, "MIX1")
+    a.addi(8, 0, 999)  # poison
+    a.label("MIX1")
+    a.lw(8, 20, 0)
+    a.add(9, 8, 7)
+    a.check_reg(9, 110, 2)
+    
+    # More complex mix
+    a.lui(10, 0x12345)
+    a.ori(11, 10, 0x678)
+    a.sw(11, 20, 8)
+    a.srli(12, 11, 4)
+    a.lw(13, 20, 8)
+    a._and(14, 12, 13)
+    a.check_reg(14, 0x01234578, 3)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_auipc_pc_relative(a: Asm):
+    """Test AUIPC and PC-relative addressing"""
+    a.init_test()
+    
+    # AUIPC gives current PC + (imm << 12)
+    a.auipc(1, 0)      # x1 = current PC
+    a.auipc(2, 1)      # x2 = PC + 0x1000
+    a.sub(3, 2, 1)     # x3 = 0x1000
+    a.check_reg(3, 0x1000, 0)
+    
+    # Use AUIPC for PC-relative data access
+    a.auipc(4, 0)
+    a.addi(5, 4, 32)   # Point 32 bytes ahead
+    
+    # AUIPC with JAL for long jumps
+    a.auipc(6, 0)
+    a.addi(7, 6, 4)    # Next instruction
+    a.check_reg(7, a.pc() + 4, 1)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_control_flow_chaos(a: Asm):
+    """Chaotic control flow to stress branch predictor"""
+    a.init_test()
+    
+    a.addi(10, 0, 0)  # result
+    
+    # Jump table simulation
+    a.addi(1, 0, 2)
+    a.beq(1, 0, "CASE0")
+    a.addi(2, 1, -1)
+    a.beq(2, 0, "CASE1")
+    a.addi(3, 2, -1)
+    a.beq(3, 0, "CASE2")
+    a.jal(0, "CASE_DEFAULT")
+    
+    a.label("CASE0")
+    a.addi(10, 10, 1)
+    a.jal(0, "CASE_END")
+    
+    a.label("CASE1")
+    a.addi(10, 10, 10)
+    a.jal(0, "CASE_END")
+    
+    a.label("CASE2")
+    a.addi(10, 10, 100)
+    a.jal(0, "CASE_END")
+    
+    a.label("CASE_DEFAULT")
+    a.addi(10, 10, 1000)
+    
+    a.label("CASE_END")
+    a.check_reg(10, 100, 0)
+    
+    # Nested ternary-like pattern
+    a.li(4, 5)
+    a.li(5, 10)
+    a.blt(4, 5, "TERN1_TRUE")
+    a.addi(11, 0, 0)
+    a.jal(0, "TERN1_END")
+    a.label("TERN1_TRUE")
+    a.bge(4, 0, "TERN2_TRUE")
+    a.addi(11, 0, 1)
+    a.jal(0, "TERN1_END")
+    a.label("TERN2_TRUE")
+    a.addi(11, 0, 2)
+    a.label("TERN1_END")
+    a.check_reg(11, 2, 1)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_stress_reorder_buffer(a: Asm):
+    """Stress the reorder buffer with many in-flight instructions"""
+    a.init_test()
+    
+    # Create many independent operations
+    a.addi(1, 0, 1)
+    a.addi(2, 0, 2)
+    a.addi(3, 0, 3)
+    a.addi(4, 0, 4)
+    a.addi(5, 0, 5)
+    a.addi(6, 0, 6)
+    a.addi(7, 0, 7)
+    a.addi(8, 0, 8)
+    a.addi(9, 0, 9)
+    a.addi(10, 0, 10)
+    
+    # Now use them all
+    a.add(11, 1, 2)
+    a.add(12, 3, 4)
+    a.add(13, 5, 6)
+    a.add(14, 7, 8)
+    a.add(15, 11, 12)
+    a.add(16, 13, 14)
+    a.add(17, 15, 16)
+    a.add(18, 17, 9)
+    a.add(19, 18, 10)
+    
+    # Expected: (1+2+3+4) + (5+6+7+8) + 9 + 10 = 55
+    a.check_reg(19, 55, 0)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_exception_boundary_test(a: Asm):
+    """Test instruction sequences that might cause pipeline exceptions"""
+    a.init_test()
+    
+    # x0 write attempts (should be ignored)
+    a.addi(0, 0, 999)
+    a.lui(0, 0x12345)
+    a.add(0, 1, 2)
+    a.check_reg(0, 0, 0)  # x0 should still be 0
+    
+    # Read from x0
+    a.add(1, 0, 0)
+    a.addi(2, 0, 100)
+    a.add(3, 1, 2)
+    a.check_reg(3, 100, 1)
+    
+    # Use x0 as both source and dest
+    a.add(0, 0, 0)
+    a._xor(0, 0, 0)
+    a.check_reg(0, 0, 2)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_comprehensive_memory(a: Asm):
+    """Comprehensive memory test covering all load/store combinations"""
+    a.init_test()
+    
+    a.li(20, 0x00000300, "mem base")
+    
+    # Test all store sizes
+    a.li(1, 0x12345678)
+    a.sw(1, 20, 0)
+    a.sh(1, 20, 4)
+    a.sb(1, 20, 6)
+    
+    # Test all load sizes with sign extension
+    a.lw(2, 20, 0)
+    a.check_reg(2, 0x12345678, 0)
+    
+    a.lh(3, 20, 4)
+    a.check_reg(3, 0x00005678, 1)  # Sign extension of 0x5678
+    
+    a.lhu(4, 20, 4)
+    a.check_reg(4, 0x00005678, 2)  # Zero extension
+    
+    a.lb(5, 20, 6)
+    a.check_reg(5, 0x00000078, 3)  # Sign extension of 0x78
+    
+    a.lbu(6, 20, 6)
+    a.check_reg(6, 0x00000078, 4)  # Zero extension
+    
+    # Test negative sign extension
+    a.li(7, 0x80)
+    a.sb(7, 20, 8)
+    a.lb(8, 20, 8)
+    a.check_reg(8, 0xFFFFFF80, 5)  # Sign extended
+    
+    a.li(9, 0x8000)
+    a.sh(9, 20, 10)
+    a.lh(10, 20, 10)
+    a.check_reg(10, 0xFFFF8000, 6)  # Sign extended
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_bubble_sort(a: Asm):
+    """Bubble sort algorithm - tests loops, branches, and memory"""
+    a.init_test()
+    
+    a.li(20, 0x00000400, "array base")
+    
+    # Initialize array: [5, 2, 8, 1, 9]
+    a.li(1, 5)
+    a.sw(1, 20, 0)
+    a.li(1, 2)
+    a.sw(1, 20, 4)
+    a.li(1, 8)
+    a.sw(1, 20, 8)
+    a.li(1, 1)
+    a.sw(1, 20, 12)
+    a.li(1, 9)
+    a.sw(1, 20, 16)
+    
+    # Bubble sort
+    a.addi(10, 0, 5)   # n = 5
+    a.addi(11, 0, 0)   # i = 0
+    
+    a.label("OUTER_LOOP")
+    a.addi(12, 0, 0)   # j = 0
+    a.sub(13, 10, 11)
+    a.addi(13, 13, -1) # limit = n - i - 1
+    
+    a.label("INNER_LOOP")
+    # Load arr[j] and arr[j+1]
+    a.slli(14, 12, 2)  # j * 4
+    a.add(15, 20, 14)  # base + j*4
+    a.lw(16, 15, 0)    # arr[j]
+    a.lw(17, 15, 4)    # arr[j+1]
+    
+    # if arr[j] > arr[j+1], swap
+    a.bge(17, 16, "NO_SWAP")
+    a.sw(17, 15, 0)
+    a.sw(16, 15, 4)
+    
+    a.label("NO_SWAP")
+    a.addi(12, 12, 1)  # j++
+    a.blt(12, 13, "INNER_LOOP")
+    
+    a.addi(11, 11, 1)  # i++
+    a.blt(11, 10, "OUTER_LOOP")
+    
+    # Verify sorted: [1, 2, 5, 8, 9]
+    a.lw(1, 20, 0)
+    a.check_reg(1, 1, 0)
+    a.lw(2, 20, 4)
+    a.check_reg(2, 2, 1)
+    a.lw(3, 20, 8)
+    a.check_reg(3, 5, 2)
+    a.lw(4, 20, 12)
+    a.check_reg(4, 8, 3)
+    a.lw(5, 20, 16)
+    a.check_reg(5, 9, 4)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_factorial(a: Asm):
+    """Factorial calculation - recursive style simulation"""
+    a.init_test()
+    
+    # Calculate 6! = 720 iteratively
+    a.addi(1, 0, 1)    # result = 1
+    a.addi(2, 0, 1)    # i = 1
+    a.addi(3, 0, 7)    # limit = 7
+    
+    a.label("FACT_LOOP")
+    a.addi(2, 2, 1)    # i++
+    # result *= i
+    a.add(4, 0, 0)     # temp = 0
+    a.add(5, 0, 2)     # counter = i
+    
+    a.label("MULT_LOOP")
+    a.add(4, 4, 1)     # temp += result
+    a.addi(5, 5, -1)   # counter--
+    a.bne(5, 0, "MULT_LOOP")
+    
+    a.add(1, 4, 0)     # result = temp
+    a.bne(2, 3, "FACT_LOOP")
+    
+    a.check_reg(1, 720, 0)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_gcd_euclidean(a: Asm):
+    """Greatest Common Divisor using Euclidean algorithm"""
+    a.init_test()
+    
+    # GCD(48, 18) = 6
+    a.addi(1, 0, 48)   # a
+    a.addi(2, 0, 18)   # b
+    
+    a.label("GCD_LOOP")
+    a.beq(2, 0, "GCD_DONE")
+    
+    # temp = a % b (using repeated subtraction)
+    a.add(3, 1, 0)     # temp = a
+    a.label("MOD_LOOP")
+    a.blt(3, 2, "MOD_DONE")
+    a.sub(3, 3, 2)
+    a.jal(0, "MOD_LOOP")
+    a.label("MOD_DONE")
+    
+    # a = b, b = temp
+    a.add(1, 2, 0)
+    a.add(2, 3, 0)
+    a.jal(0, "GCD_LOOP")
+    
+    a.label("GCD_DONE")
+    a.check_reg(1, 6, 0)
+    
+    a.finalize_test(expected_x31=0)
+
+# ==========================================
+# ADD TO TESTS DICTIONARY
+# ==========================================
 TESTS: Dict[str, Tuple[str, Callable[[Asm], None]]] = {
     "selfcheck_basic": ("Self-checking basic ADD/SUB with register verification", prog_selfcheck_basic),
     "selfcheck_alu":   ("Self-checking comprehensive ALU test", prog_selfcheck_alu),
@@ -1200,6 +2079,39 @@ TESTS: Dict[str, Tuple[str, Callable[[Asm], None]]] = {
     "mem_byte_signext": ("SB + LB/LBU sign/zero extension", prog_mem_byte_signext),
     "mem_half_signext": ("SH + LH/LHU sign/zero extension", prog_mem_half_signext),
     "mem_endian_overlay": ("little-endian + overlapping loads", prog_mem_endian_overlay),
+
+    # Data hazard tests
+    "raw_hazards": ("RAW (Read-After-Write) data hazard stress test", prog_raw_data_hazards),
+    "war_waw_hazards": ("WAR/WAW hazard patterns for OOO", prog_war_waw_hazards),
+    "load_use_hazard": ("Load-use hazards and forwarding", prog_load_use_hazard),
+    "store_load_fwd": ("Store-to-load forwarding and aliasing", prog_store_load_forwarding),
+    "mem_aliasing": ("Memory address aliasing edge cases", prog_memory_aliasing),
+    
+    # Control flow tests
+    "branch_pred_stress": ("Branch prediction stress patterns", prog_branch_prediction_stress),
+    "deep_calls": ("Deeply nested function calls", prog_deeply_nested_calls),
+    "control_chaos": ("Chaotic control flow patterns", prog_control_flow_chaos),
+    
+    # Resource pressure tests
+    "reg_pressure": ("High register pressure test", prog_register_pressure),
+    "long_dependency": ("Very long dependency chains", prog_long_dependency_chain),
+    "reorder_buffer": ("Reorder buffer stress test", prog_stress_reorder_buffer),
+    "mixed_ops_stress": ("Mixed operation types stress", prog_mixed_operations_stress),
+    
+    # Edge case tests
+    "arith_edge": ("Arithmetic overflow and edge cases", prog_arithmetic_edge_cases),
+    "shift_edge": ("Comprehensive shift edge cases", prog_shift_edge_cases),
+    "bitwise_patterns": ("Bitwise operation patterns", prog_bitwise_patterns),
+    "imm_edge": ("Immediate value edge cases", prog_immediate_edge_cases),
+    "mem_boundary": ("Memory boundary access tests", prog_memory_boundary),
+    "exception_boundary": ("Exception boundary conditions", prog_exception_boundary_test),
+    
+    # Complex algorithm tests
+    "auipc_pcrel": ("AUIPC and PC-relative addressing", prog_auipc_pc_relative),
+    "comprehensive_mem": ("Comprehensive memory operations", prog_comprehensive_memory),
+    "bubble_sort": ("Bubble sort algorithm", prog_bubble_sort),
+    "factorial": ("Factorial calculation", prog_factorial),
+    "gcd": ("GCD using Euclidean algorithm", prog_gcd_euclidean),
 }
 
 # -------------------------

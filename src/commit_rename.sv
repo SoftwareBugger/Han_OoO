@@ -60,6 +60,7 @@ module commit_rename #(
     /* =========================
      * Recovery (from branch mispredict)
      * ========================= */
+    output logic        wb_mispredict_fire,    // for cpu_core to trigger redirect
     output logic        recover_valid,
     output logic [ROB_W-1:0] recover_rob_idx,
     output rob_entry_t  recover_entry,
@@ -216,6 +217,7 @@ module commit_rename #(
         /* =========================
          * Recovery (from branch mispredict)
          * ========================= */
+        .wb_mispredict_fire (wb_mispredict_fire),
         .recover_valid      (recover_valid),
         .recover_cur_rob_idx    (recover_rob_idx),
         .recover_entry      (recover_entry),

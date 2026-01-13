@@ -37,7 +37,7 @@ module fetch (
     logic              fetch_valid;
     logic [31:0]       fetch_pc;
     logic [31:0]       fetch_inst;
-    logic              fetch_epoch;
+    logic [2:0]        fetch_epoch;
 
     /* =========================
      * IMEM request

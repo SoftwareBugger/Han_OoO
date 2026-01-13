@@ -208,7 +208,7 @@ module tb_cpu_core;
       end
 
       // Commit event -> commit.jsonl (readable, same "single-line format string" style as WB)
-      if (dut.commit_valid && dut.commit_ready) begin
+      if (dut.commit_valid && dut.commit_ready && ~dut.recover_valid) begin
         commits <= commits + 1;
         cycles_since_commit <= 0;
 

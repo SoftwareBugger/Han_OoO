@@ -42,6 +42,7 @@ module ALU (
 
     unique case (b.src1_select)
       SRC_RS1:  op_a = rs1_val;
+      SRC_PC:    op_a = b.pc;
       SRC_ZERO: op_a = 32'b0;
       default:  op_a = 32'b0;
     endcase
@@ -112,12 +113,10 @@ module ALU (
   uop_class_e out_uop_class_q;
 
   // Does this entry require a WB handshake?
-  logic out_needs_wb_q;
-  assign out_needs_wb_q = out_uses_rd_q;
 
   // When can the buffered result retire?
   logic out_deq_fire;
-  assign out_deq_fire = out_vld_q && (!out_needs_wb_q || wb_ready);
+  assign out_deq_fire = out_vld_q && (wb_ready);
 
   // Can we accept a new request?
   // If buffer empty OR retiring this cycle (1-deep skid)

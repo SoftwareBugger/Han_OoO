@@ -51,6 +51,7 @@ module ROB #(
     /* =========================
      * Recovery (from branch mispredict handling inside ROB)
      * ========================= */
+    output logic           wb_mispredict_fire,    // for cpu_core to trigger redirect
     output logic           recover_valid,
     output logic [ROB_W_P-1:0] recover_cur_rob_idx,     // ROB idx that caused recovery
     output rob_entry_t     recover_entry,         // most-recent allocated entry while recovering (tail-1)
@@ -86,6 +87,17 @@ module ROB #(
     /* =========================
      * Status / handshakes
      * ========================= */
+
+    /* =========================
+     * Recovery Logic
+     * ========================= */
+    typedef enum logic [1:0] {
+        NORMAL,
+        RECOVERY
+    } state_t;
+
+    state_t current_state, next_state;
+
     assign alloc_ready = (count != ROB_SIZE_P) && (~recover_valid);
     logic commit_fire;
     logic alloc_fire;
@@ -213,18 +225,7 @@ module ROB #(
         end
     end
 
-    /* =========================
-     * Recovery Logic
-     * ========================= */
-    typedef enum logic [1:0] {
-        NORMAL,
-        RECOVERY
-    } state_t;
-
-    state_t current_state, next_state;
-
     // "wb mispredict" event (only when the wb matches the ROB entry's epoch)
-    logic wb_mispredict_fire;
     assign wb_mispredict_fire =
         (wb_valid &&
         wb_pkt.is_branch &&
@@ -261,12 +262,17 @@ module ROB #(
                 if (wb_mispredict_fire) begin
                     next_state = RECOVERY;
                     init_recover_idx = 1'b1;
-                end
+                end 
             end
             RECOVERY: begin
                 // stay in recovery until flushed externally
                 if (tail_ptr == recover_rob_idx + 1'b1) begin
-                    next_state = NORMAL;
+                    if (wb_mispredict_fire) begin
+                        next_state = RECOVERY;
+                        init_recover_idx = 1'b1;
+                    end else begin
+                        next_state = NORMAL;
+                    end
                 end else begin
                     recover_valid = 1'b1;
                 end

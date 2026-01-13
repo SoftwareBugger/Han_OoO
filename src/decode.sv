@@ -16,7 +16,7 @@ module decode (
   input  logic [31:0] fetch_pc,
   input  logic        fetch_valid,
   output logic        fetch_ready,
-  input  logic        fetch_epoch,
+  input  logic [2:0]  fetch_epoch,
 
   /* =============================
    * branch prediction info from PC
@@ -272,7 +272,7 @@ module decode (
   // ============================================================
   logic out_vld_q;
   decoded_bundle_t out_d_q;
-  logic out_epoch_q;
+  logic [2:0] out_epoch_q;
   logic first_inst;
 
   // downstream handshake
@@ -289,12 +289,16 @@ module decode (
     if (!rst_n) begin
       out_vld_q <= 1'b0;
       out_d_q   <= 'd0;
-      out_epoch_q <= 1'b0;
-      first_inst <= 1'b1;
+      out_epoch_q <= 3'b0;
+      //first_inst <= 1'b1;
     end else begin
+      // if (redirect_valid) begin
+      //   first_inst <= 1'b1;
+      // end else if (out_enq_fire) begin
+      //   first_inst <= 1'b0;
+      // end
       if (out_enq_fire) begin
-        first_inst <= 1'b0;
-        out_vld_q <= (d.pc != out_d_q.pc) ? 1'b1 : first_inst; // only update valid if new PC
+        out_vld_q <= 1'b1;//(d.pc != out_d_q.pc) ? 1'b1 : first_inst; // only update valid if new PC
         out_d_q   <= d;        // latch decoded result
         out_epoch_q <= fetch_epoch;
       end else if (out_deq_fire) begin
@@ -303,12 +307,12 @@ module decode (
     end
   end
 
-  logic decode_epoch;
+  logic [2:0] decode_epoch;
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      decode_epoch <= 1'b0;
+      decode_epoch <= 3'b0;
     end else if (redirect_valid) begin
-      decode_epoch <= ~decode_epoch;
+      decode_epoch <= decode_epoch + 3'b1;
     end
   end
 

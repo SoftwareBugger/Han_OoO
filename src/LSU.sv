@@ -94,32 +94,92 @@ module LSU (
         end
     endfunction
 
+    // Helper function: Extract 32-bit word from 64-bit data based on address
+    function automatic logic [31:0] extract_word64(
+        input logic [63:0] data64,
+        input logic [2:0]  addr_lo
+    );
+        logic [31:0] word;
+        begin
+            // Select upper or lower 32 bits based on addr[2]
+            word = addr_lo[2] ? data64[63:32] : data64[31:0];
+            return word;
+        end
+    endfunction
+
+    // Modified load_extract32: first extract word, then extract byte/half
     function automatic logic [31:0] load_extract32(
-        input logic [31:0] raw32,
-        input logic [1:0]  byte_off,
+        input logic [63:0] raw64,      // Changed to 64-bit input
+        input logic [2:0]  addr_lo,    // Changed to 3 bits (includes word select)
         input mem_size_e   sz,
         input logic        is_unsigned
     );
+        logic [31:0] word32;
         logic [31:0] res;
         logic [7:0]  b;
         logic [15:0] h;
         begin
+            // First extract the correct 32-bit word from 64-bit data
+            word32 = extract_word64(raw64, addr_lo);
+            
+            // Then extract byte/halfword from the 32-bit word
             res = 32'b0;
             unique case (sz)
                 MSZ_B: begin
-                    b = raw32 >> (byte_off*8);
+                    b = word32 >> (addr_lo[1:0]*8);
                     res = is_unsigned ? {24'b0, b} : {{24{b[7]}}, b};
                 end
                 MSZ_H: begin
-                    h = raw32 >> ({byte_off[1],1'b0}*8);
+                    h = word32 >> ({addr_lo[1],1'b0}*8);
                     res = is_unsigned ? {16'b0, h} : {{16{h[15]}}, h};
                 end
-                MSZ_W: res = raw32;
-                default: res = raw32;
+                MSZ_W: res = word32;
+                default: res = word32;
             endcase
             return res;
         end
     endfunction
+
+
+    function automatic logic older_than(
+        input logic [ROB_W-1:0] a,
+        input logic [ROB_W-1:0] b,
+        input logic [ROB_W-1:0] head
+    );
+        logic [ROB_W-1:0] ra, rb;
+        begin
+            ra = a - head;   // wraps naturally in K bits
+            rb = b - head;
+            return (ra < rb);
+        end
+    endfunction
+
+    function automatic logic [3:0] byte_mask_32(
+        input logic [1:0] off,
+        input logic [1:0] size  // 0:1B, 1:2B, 2:4B
+    );
+        logic [3:0] m;
+        begin
+            unique case (size)
+            2'd0: m = 4'b0001 << off;                 // 1 byte
+            2'd1: m = 4'b0011 << {off[1],1'b0};       // 2 bytes (off[0]==0)
+            2'd2: m = 4'b1111;                        // 4 bytes (off==0)
+            default: m = 4'b0000;
+            endcase
+            return m;
+        end
+    endfunction
+
+    function automatic logic [7:0] get_byte (
+        input logic [31:0] data,
+        input logic [1:0]  byte_off
+    );
+        begin
+            get_byte = data[byte_off*8 +: 8];
+        end
+    endfunction
+
+
 
     // ============================================================
     // AGU (current RS uop)
@@ -140,7 +200,14 @@ module LSU (
         end
     endgenerate
 
-    assign agu_data     = rs2_val[0];                        // store data
+    always_comb begin
+        unique case (agu_size[0])
+            MSZ_B: agu_data = rs2_val[0][7:0] << ({agu_addr[0][1:0], 3'b0}); // replicate byte
+            MSZ_H: agu_data = rs2_val[0][15:0] << ({agu_addr[0][1], 4'b0}); // replicate half
+            MSZ_W: agu_data = rs2_val[0];
+            default: agu_data = rs2_val[0];
+        endcase
+    end                      // store data
     assign agu_unsigned = (req_uop[1].bundle.op == OP_LBU) || (req_uop[1].bundle.op == OP_LHU);
 
     // Store "execute" identity (used to fill an existing SQ entry)
@@ -162,9 +229,9 @@ module LSU (
     sq_entry_t sq_entries [SQ_SIZE-1:0];
     logic [SQ_SIZE-1:0] valid;
 
-    logic [$clog2(SQ_SIZE):0] tail_ptr;
-    logic [$clog2(SQ_SIZE):0] last_tail_ptr;
-    logic [$clog2(SQ_SIZE):0] head_ptr;
+    logic [$clog2(SQ_SIZE)-1:0] tail_ptr;
+    logic [$clog2(SQ_SIZE)-1:0] last_tail_ptr;
+    logic [$clog2(SQ_SIZE)-1:0] head_ptr;
     logic [$clog2(SQ_SIZE):0] count;
 
     logic sq_entry_in_fire;
@@ -183,6 +250,8 @@ module LSU (
     assign mem_wr_fire = mem_wr_ready && valid[head_ptr] && sq_entries[head_ptr].committed
                         && sq_entries[head_ptr].addr_rdy
                         && sq_entries[head_ptr].data_rdy;
+
+    logic st_busy;
 
     logic st_fire;
     assign st_fire = st_valid; // simple: store-exec writes addr/data when a store uop arrives
@@ -260,9 +329,20 @@ module LSU (
             end
 
             if (mem_wr_fire) begin
-                valid[head_ptr] <= 1'b0;
-                head_ptr <= head_ptr + 1;
+                st_busy <= 1'b1;
+                dmem.st_resp_ready <= 1'b1; // ready to accept response
             end
+
+            if (dmem.st_resp_valid && dmem.st_resp_ready) begin
+                // Store writeback from dmem
+                valid[head_ptr] <= 1'b0;
+                sq_entries[head_ptr].sent <= 1'b1;
+                head_ptr <= head_ptr + 1;
+                st_busy <= 1'b0;
+                dmem.st_resp_ready <= 1'b0;
+            end
+
+
 
             if (commit_fire && commit_is_store) begin
                 for (int i = 0; i < SQ_SIZE; i++) begin
@@ -329,9 +409,8 @@ module LSU (
         all_st_info_rdy = 1'b1;
         for (int i = 0; i < SQ_SIZE; i++) begin
             if ( valid[i]
-              && (sq_entries[i].epoch == req_uop[1].epoch)
-              && (sq_entries[i].rob_idx < req_uop[1].rob_idx)
-              && !st_info_rdy[i] ) begin
+              && !st_info_rdy[i]
+              &&  older_than(sq_entries_ordered[i].rob_idx, req_uop[1].rob_idx, commit_rob_idx)) begin
                 all_st_info_rdy = 1'b0;
             end
         end
@@ -365,64 +444,136 @@ module LSU (
     logic valid_ordered [SQ_SIZE-1:0];
     always_comb begin
         for (int i = 0; i < SQ_SIZE; i++) begin
-            sq_entries_ordered[i] = sq_entries[(tail_ptr - i)];
-            valid_ordered[i] = valid[(tail_ptr - i)];
+            sq_entries_ordered[i] = sq_entries[(head_ptr + i)];
+            valid_ordered[i] = valid[(head_ptr + i)];
         end 
     end
 
     // Forwarding check (only valid when accepting new request)
-    logic fw_hit_comb_young;
+    // need to check all four bytes
+    logic [3:0] fw_hit_comb_young;
     logic [31:0] fw_data_comb_young;
-    logic fw_hit_comb_committed;
+    logic [3:0] fw_hit_comb_committed;
     logic [31:0] fw_data_comb_committed;
+    logic need_mem_load;
+    logic [3:0] overlap_mask [SQ_SIZE-1:0];
 
     always_comb begin
-        fw_hit_comb_young = 1'b0;
+        fw_hit_comb_young = 4'b0;
         fw_data_comb_young = 32'b0;
-        fw_hit_comb_committed = 1'b0;
+        fw_hit_comb_committed = 4'b0;
         fw_data_comb_committed = 32'b0;
-        
+
+        unique case (agu_size[1])
+            MSZ_B: begin
+                fw_hit_comb_young = 4'b1111 << agu_addr[1][1:0];
+                fw_hit_comb_committed = 4'b1111 << agu_addr[1][1:0];
+            end
+            MSZ_H: begin
+                if (agu_addr[1][1] == 1'b0) begin
+                    fw_hit_comb_young = 4'b1100;
+                    fw_hit_comb_committed = 4'b1100;
+                end else begin
+                    fw_hit_comb_young = 4'b0011;
+                    fw_hit_comb_committed = 4'b0011;
+                end
+            end
+            MSZ_W: begin
+                fw_hit_comb_young = 4'b0000;
+                fw_hit_comb_committed = 4'b0000;
+            end
+            default: begin
+                fw_hit_comb_young = 4'b0000;
+                fw_hit_comb_committed = 4'b0000;
+            end
+        endcase
+
         if (can_accept_load) begin
             for (int i = 0; i < SQ_SIZE; i++) begin
+                overlap_mask[i] = byte_mask_32(agu_addr[1][1:0], agu_size[1]) &
+                                  byte_mask_32(sq_entries_ordered[i].addr[1:0], sq_entries_ordered[i].mem_size);
                 if (valid_ordered[i] &&
                     sq_entries_ordered[i].addr_rdy &&
                     sq_entries_ordered[i].data_rdy &&
-                    (sq_entries_ordered[i].addr == agu_addr[1]) &&
-                    (sq_entries_ordered[i].rob_idx < req_uop[1].rob_idx)) begin
-                    // Younger store match
-                        fw_hit_comb_young = 1'b1;
-                        fw_data_comb_young = sq_entries_ordered[i].data;
+                    (sq_entries_ordered[i].addr[31:2] == agu_addr[1][31:2]) &&
+                    (|overlap_mask[i]) &&
+                    older_than(sq_entries_ordered[i].rob_idx, req_uop[1].rob_idx, commit_rob_idx)) begin
+                    // Younger store words match
+                    for (int b = 0; b < 4; b++) begin
+                        if (overlap_mask[i][b]) begin
+                            fw_hit_comb_young[b] = 1'b1;
+                            fw_data_comb_young[b*8 +: 8] = sq_entries_ordered[i].data[b*8 +: 8];
+                        end
+                    end
                 end
 
                 if (valid_ordered[i] &&
                     sq_entries_ordered[i].committed &&
                     sq_entries_ordered[i].addr_rdy &&
                     sq_entries_ordered[i].data_rdy &&
-                    (sq_entries_ordered[i].addr == agu_addr[1]) &&
-                    (sq_entries_ordered[i].committed)) begin
+                    (|overlap_mask[i]) &&
+                    (sq_entries_ordered[i].addr[31:2] == agu_addr[1][31:2])) begin
                     // Oldest committed store match
-                        fw_hit_comb_committed = 1'b1;
-                        fw_data_comb_committed = sq_entries_ordered[i].data;
+                    for (int b = 0; b < 4; b++) begin
+                        if (overlap_mask[i][b]) begin
+                            fw_hit_comb_committed[b] = 1'b1;
+                            fw_data_comb_committed[b*8 +: 8] = sq_entries_ordered[i].data[b*8 +: 8];
+                        end
+                    end
                 end
             end
         end
     end
 
     // Combine forwarding hits
+    logic [3:0] fw_hit_comb_arr;
+    logic [3:0] fw_hit_comb_arr_ff;
     logic fw_hit_comb;
+    logic fw_hit_ff;
     logic [31:0] fw_data_comb;
-    assign fw_hit_comb = fw_hit_comb_young || fw_hit_comb_committed;
-    assign fw_data_comb = fw_hit_comb_young ? fw_data_comb_young : fw_data_comb_committed;
+    logic [31:0] fw_hit_data_ff;
+    assign need_mem_load = ~(&fw_hit_comb_arr);
+    assign fw_hit_comb_arr = fw_hit_comb_young | fw_hit_comb_committed;
+    assign fw_hit_comb = |fw_hit_comb_arr;
+    always_comb begin
+        fw_data_comb = 32'b0;
+        for (int b = 0; b < 4; b++) begin
+            if (fw_hit_comb_young[b]) begin
+                fw_data_comb[b*8 +: 8] = fw_data_comb_young[b*8 +: 8];
+            end else if (fw_hit_comb_committed[b]) begin
+                fw_data_comb[b*8 +: 8] = fw_data_comb_committed[b*8 +: 8];
+            end
+        end
+    end
+
+    // registered forwarding hits (for load holding register path)
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            fw_hit_comb_arr_ff <= 4'b0000;
+            fw_hit_data_ff <= 32'b0;
+            fw_hit_ff <= 1'b0;
+        end else if (flush_valid) begin
+            fw_hit_comb_arr_ff <= 4'b0000;
+            fw_hit_data_ff <= 32'b0;
+            fw_hit_ff <= 1'b0;
+        end else begin
+            if (need_mem_load && can_accept_load) begin
+                fw_hit_comb_arr_ff <= fw_hit_comb_arr;
+                fw_hit_data_ff <= fw_data_comb;
+                fw_hit_ff <= fw_hit_comb;
+            end
+        end
+    end
 
     // Load request holding register state machine
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ld_req_valid <= 1'b0;
-        end else if (flush_valid || recover_valid) begin
+        end else if (flush_valid) begin
             ld_req_valid <= 1'b0;
         end else begin
             if (can_accept_load) begin
-                if (fw_hit_comb) begin
+                if (fw_hit_comb && !need_mem_load) begin
                     // Forwarded immediately, don't hold request
                     ld_req_valid <= 1'b0;
                 end else begin
@@ -459,7 +610,7 @@ module LSU (
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ld_busy <= 1'b0;
-        end else if (flush_valid || recover_valid) begin
+        end else if (flush_valid) begin
             ld_busy <= 1'b0;
         end else begin
             if (ld_fire) begin
@@ -486,14 +637,29 @@ module LSU (
     // Load data formation + WB buffer (1-entry, backpressure-safe)
     // ============================================================
     logic [31:0] load_data;
-
+    logic [31:0] load_data_bf_merge;
+    logic [63:0] fw_data64;
     always_comb begin
-        if (can_accept_load && fw_hit_comb) begin
-            // Forwarded load data
-            load_data = load_extract32(fw_data_comb, agu_addr[1][1:0], agu_size[1], agu_unsigned);
+        if (can_accept_load && fw_hit_comb && ~need_mem_load) begin
+            // Forwarded load data - store data is already 32-bit
+            // Pack it into 64-bit format for uniform processing
+            // Forwarded load data - store data is already 32-bit
+            // Pack it into 64-bit format for uniform processing
+            fw_data64 = store_pack64(fw_data_comb, agu_addr[1][2:0]);
+            load_data = load_extract32(fw_data64, agu_addr[1][2:0], agu_size[1], agu_unsigned);
+        end else if (fw_hit_ff) begin
+            // Memory response data - already 64-bit
+            load_data_bf_merge = load_extract32(dmem.ld_resp_data, ld_addr_q[2:0], ld_size_q, ld_unsigned_q);
+            for (int b = 0; b < 4; b++) begin
+                if (fw_hit_comb_arr_ff[b]) begin
+                    load_data[b*8 +: 8] = fw_hit_data_ff[b*8 +: 8];
+                end else begin
+                    load_data[b*8 +: 8] = load_data_bf_merge[b*8 +: 8];
+                end
+            end
         end else begin
-            // Memory response data
-            load_data = load_extract32(dmem.ld_resp_data, ld_addr_q[1:0], ld_size_q, ld_unsigned_q);
+            // Memory response data - already 64-bit
+            load_data = load_extract32(dmem.ld_resp_data, ld_addr_q[2:0], ld_size_q, ld_unsigned_q);
         end
     end
 
@@ -501,9 +667,8 @@ module LSU (
     // 1. Forwarded load: can_accept_load && fw_hit_comb && !wb_buf_valid
     // 2. Memory response: ld_busy && dmem.ld_resp_valid && !wb_buf_valid
     logic wb_buf_enq;
-    assign wb_buf_enq = (!wb_buf_valid) && 
-                        ((can_accept_load && fw_hit_comb) || 
-                        (ld_busy && dmem.ld_resp_valid));
+    assign wb_buf_enq = (can_accept_load && fw_hit_comb && ~need_mem_load) || 
+                        (ld_busy && dmem.ld_resp_valid);
 
     // WB buffer dequeue: downstream accepts
     assign wb_fire = wb_buf_valid && wb_ready;
@@ -517,13 +682,13 @@ module LSU (
             wb_buf_epoch <= '0;
             wb_buf_uses_rd <= 1'b0;
             wb_buf_pc <= 32'b0;
-        end else if (flush_valid || recover_valid) begin
+        end else if (flush_valid) begin
             wb_buf_valid <= 1'b0;
         end else begin
             if (wb_buf_enq) begin
                 wb_buf_valid   <= 1'b1;
                 wb_buf_data    <= load_data;
-                if (can_accept_load && fw_hit_comb) begin
+                if (can_accept_load && fw_hit_comb && ~need_mem_load) begin
                     // Forwarded path metadata
                     wb_buf_rob_idx <= req_uop[1].rob_idx;
                     wb_buf_prd_new <= req_uop[1].prd_new;

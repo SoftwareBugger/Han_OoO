@@ -11,7 +11,7 @@ module PC (
     output logic              fetch_valid,
     output logic [31:0]       fetch_pc,
     output logic [31:0]       fetch_inst,
-    output logic              fetch_epoch,
+    output logic [2:0]        fetch_epoch,
 
     /* =========================
      * Redirect / predictor update
@@ -51,11 +51,14 @@ module PC (
     // ============================================================
     localparam int PC_QUEUE_SIZE = 8;
     logic [31:0] pc_req_q, pc_req_next;
-    logic [31:0] pc_issued_q [PC_QUEUE_SIZE-1:0];
-    logic pred_taken_q [PC_QUEUE_SIZE-1:0];
-    logic [31:0] pred_target_q [PC_QUEUE_SIZE-1:0];
-    logic pc_epoch_q [PC_QUEUE_SIZE-1:0];
-    logic [$clog2(PC_QUEUE_SIZE)-1:0] pc_issued_head, pc_issued_tail;
+    logic [31:0] pc_issued_q [0:PC_QUEUE_SIZE-1];
+    logic [31:0] pc_issued_resp_q [0:PC_QUEUE_SIZE-1];
+    logic pred_taken_q [0:PC_QUEUE_SIZE-1];
+    logic [31:0] pred_target_q [0:PC_QUEUE_SIZE-1];
+    logic [2:0] pc_epoch_q [0:PC_QUEUE_SIZE-1];
+    logic [$clog2(PC_QUEUE_SIZE)-1:0] pc_issued_head, pc_issued_tail, pc_issued_decoded;
+    logic [$clog2(PC_QUEUE_SIZE)-1:0] pc_issued_head_to_decode, pc_issued_tail_to_head;
+    logic pc_issued_response_valid [0:PC_QUEUE_SIZE-1];
 
     logic pred_valid;
 
@@ -78,18 +81,18 @@ module PC (
     // ============================================================
     // Fetch global epoch
     // ============================================================
-    logic fetch_global_epoch;
+    logic [2:0] fetch_global_epoch;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
-            fetch_global_epoch <= 1'b0;
+            fetch_global_epoch <= 3'b0;
         else if (redirect_valid)
-            fetch_global_epoch <= ~fetch_global_epoch;
+            fetch_global_epoch <= fetch_global_epoch + 3'b1;
     end
 
     // ============================================================
     // IMEM handshake
     // ============================================================
-    assign imem_req_valid = !redirect_valid;
+    assign imem_req_valid = !redirect_valid && (~(pc_issued_head_to_decode < 0) && ~(pc_issued_tail_to_head < 0) && (pc_issued_head_to_decode + pc_issued_tail_to_head != PC_QUEUE_SIZE - 1));
     assign imem_req_addr  = pc_req_q;
 
     logic imem_req_fire; 
@@ -110,10 +113,7 @@ module PC (
         pc_req_next = pc_req_q;
         if (redirect_valid)
             pc_req_next = redirect_pc;
-        else if (~fetch_fire) begin
-            // hold PC
-            pc_req_next = pc_req_q;
-        end else if (imem_req_fire) begin
+        else if (imem_req_fire) begin
             if (pred_valid && pred_taken_bp)
                 pc_req_next = pred_target_bp;
             else
@@ -126,16 +126,23 @@ module PC (
             pc_req_q <= 32'h0000_0000;
             pc_issued_head <= '0;
             pc_issued_tail <= '0;
+            pc_issued_decoded <= '0;
+            pc_issued_head_to_decode <= '0;
+            pc_issued_tail_to_head <= '0;
             for (int i = 0; i < PC_QUEUE_SIZE; i++) begin
                 pc_issued_q[i] <= 32'h0000_0000;
-                pc_epoch_q[i] <= 1'b0;
+                pc_epoch_q[i] <= 3'b0;
                 pred_taken_q[i] <= 1'b0;
                 pred_target_q[i] <= 32'h0000_0000;
+                pc_issued_resp_q[i] <= 32'h0000_0000;
+                pc_issued_response_valid[i] <= 1'b0;
             end
         end else begin
             pc_req_q <= pc_req_next;
             if (imem_resp_fire) begin
                 pc_issued_head <= pc_issued_head + 1;
+                pc_issued_resp_q[pc_issued_head] <= imem_resp_inst;
+                pc_issued_response_valid[pc_issued_head] <= 1'b1;
             end 
             if (imem_req_fire) begin
                 pc_issued_q[pc_issued_tail] <= pc_req_q;
@@ -143,27 +150,74 @@ module PC (
                 pred_taken_q[pc_issued_tail] <= pred_taken_bp;
                 pred_target_q[pc_issued_tail] <= pred_target_bp;
                 pc_issued_tail <= pc_issued_tail + 1;
+                pc_issued_response_valid[pc_issued_tail] <= 1'b0;
             end
+            if (fetch_fire) begin
+                pc_issued_decoded <= pc_issued_decoded + 1;
+            end
+            unique case ({imem_resp_fire, imem_req_fire, fetch_fire})
+                3'b100: begin
+                    // only resp
+                    pc_issued_head_to_decode <= pc_issued_head_to_decode + 1;
+                    pc_issued_tail_to_head <= pc_issued_tail_to_head - 1;
+                end
+                3'b010: begin
+                    // only req
+                    pc_issued_tail_to_head <= pc_issued_tail_to_head + 1;
+                end
+                3'b001: begin
+                    // only fetch
+                    pc_issued_head_to_decode <= pc_issued_head_to_decode - 1;
+                end
+                3'b110: begin
+                    // resp + req
+                    pc_issued_head_to_decode <= pc_issued_head_to_decode + 1;
+                end
+                3'b101: begin
+                    // resp + fetch
+                    pc_issued_tail_to_head <= pc_issued_tail_to_head - 1;
+                end
+                3'b011: begin
+                    // req + fetch
+                    pc_issued_tail_to_head <= pc_issued_tail_to_head + 1;
+                    pc_issued_head_to_decode <= pc_issued_head_to_decode - 1;
+                end
+                default: begin
+                    // no ops
+                end
+            endcase
         end
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            fetch_pc <= 32'h0000_0000;
-            fetch_valid <= 1'b0;
-            fetch_inst <= 32'b0;
-            fetch_epoch <= 1'b0;
-            pred_taken <= 1'b0;
-            pred_target <= 32'h0000_0000;
-        end else if (imem_resp_fire) begin
-            fetch_pc <= pc_issued_q[pc_issued_head];
-            fetch_valid <= 1'b1;
-            fetch_inst <= imem_resp_inst;
-            fetch_epoch <= pc_epoch_q[pc_issued_head];
-            pred_taken <= pred_taken_q[pc_issued_head];
-            pred_target <= pred_target_q[pc_issued_head];
-        end else if (fetch_fire) begin
-            fetch_valid <= 1'b0;
+    // always_ff @(posedge clk or negedge rst_n) begin
+    //     if (!rst_n) begin
+    //         fetch_pc <= 32'h0000_0000;
+    //         fetch_valid <= 1'b0;
+    //         fetch_inst <= 32'b0;
+    //         fetch_epoch <= 1'b0;
+    //         pred_taken <= 1'b0;
+    //         pred_target <= 32'h0000_0000;
+    //     end else if (~(pc_issued_head_to_decode < 0)) begin
+            
+    //     end else if (fetch_fire) begin
+    //         fetch_valid <= 1'b0;
+    //     end
+    // end
+    always_comb begin
+        if (~(pc_issued_head_to_decode < 0) && pc_issued_response_valid[pc_issued_decoded]) begin
+            fetch_pc = pc_issued_q[pc_issued_decoded];
+            fetch_inst = pc_issued_resp_q[pc_issued_decoded];
+            fetch_epoch = pc_epoch_q[pc_issued_decoded];
+            pred_taken = pred_taken_q[pc_issued_decoded];
+            pred_target = pred_target_q[pc_issued_decoded];
+            fetch_valid = 1'b1;
+        end else begin
+            fetch_pc = 32'h0000_0000;
+            fetch_inst = 32'b0;
+            fetch_epoch = 1'b0;
+            pred_taken = 1'b0;
+            pred_target = 32'h0000_0000;
+            fetch_valid = 1'b0;
         end
     end
 endmodule

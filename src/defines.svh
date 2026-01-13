@@ -334,6 +334,7 @@ interface dmem_if #(parameter int LDTAG_W=4);
 
   // STORE request
   logic              st_valid, st_ready;
+  logic              st_resp_ready, st_resp_valid;
   logic [31:0]       st_addr;
   logic [2:0]        st_size;
   logic [63:0]       st_wdata;
@@ -345,8 +346,8 @@ interface dmem_if #(parameter int LDTAG_W=4);
     input  ld_ready,
     input  ld_resp_valid, ld_resp_tag, ld_resp_data, ld_resp_err,
     output ld_resp_ready,
-    output st_valid, st_addr, st_size, st_wdata, st_wstrb,
-    input  st_ready
+    output st_valid, st_addr, st_size, st_wdata, st_wstrb, st_resp_ready,
+    input  st_ready, st_resp_valid
   );
 
   modport slave (
@@ -354,8 +355,8 @@ interface dmem_if #(parameter int LDTAG_W=4);
     output ld_ready,
     output ld_resp_valid, ld_resp_tag, ld_resp_data, ld_resp_err,
     input  ld_resp_ready,
-    input  st_valid, st_addr, st_size, st_wdata, st_wstrb,
-    output st_ready
+    input  st_valid, st_addr, st_size, st_wdata, st_wstrb, st_resp_ready,
+    output st_ready, st_resp_valid
   );
 endinterface
 
