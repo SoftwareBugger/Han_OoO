@@ -2060,6 +2060,228 @@ def prog_gcd_euclidean(a: Asm):
     
     a.finalize_test(expected_x31=0)
 
+def prog_recursive_factorial(a: Asm):
+    """True recursive factorial using stack simulation"""
+    a.init_test()
+    a.li(20, 0x00001000, "stack pointer")
+    
+    # Calculate factorial(5) = 120
+    a.addi(10, 0, 5)  # n = 5
+    a.jal(1, "FACTORIAL")
+    a.check_reg(11, 120, 0)
+    a.jal(0, "END")
+    
+    a.label("FACTORIAL")
+    # Base case: if n <= 1, return 1
+    a.addi(2, 0, 1)
+    a.bge(10, 2, "RECURSE")
+    a.addi(11, 0, 1)
+    a.jalr(0, 1, 0)
+    
+    a.label("RECURSE")
+    # Save return address and n
+    a.sw(1, 20, 0)   # Push return addr
+    a.sw(10, 20, 4)  # Push n
+    a.addi(20, 20, 8)
+    
+    # factorial(n-1)
+    a.addi(10, 10, -1)
+    a.jal(1, "FACTORIAL")
+    
+    # Restore and compute n * factorial(n-1)
+    a.addi(20, 20, -8)
+    a.lw(10, 20, 4)  # Pop n
+    a.lw(1, 20, 0)   # Pop return addr
+    
+    # Multiply n * result (using repeated addition)
+    a.add(12, 0, 0)
+    a.add(13, 0, 10)
+    a.label("MUL_LOOP")
+    a.beq(13, 0, "MUL_DONE")
+    a.add(12, 12, 11)
+    a.addi(13, 13, -1)
+    a.jal(0, "MUL_LOOP")
+    a.label("MUL_DONE")
+    a.add(11, 12, 0)
+    a.jalr(0, 1, 0)
+    
+    a.label("END")
+    a.finalize_test(expected_x31=0)
+
+def prog_instruction_mix(a: Asm):
+    """Test diverse instruction mix for IPC measurement"""
+    a.init_test()
+    a.li(20, 0x00000500, "mem base")
+    
+    # Deliberately create a mix:
+    # - 40% ALU ops
+    # - 30% memory ops
+    # - 20% branches
+    # - 10% jumps
+    
+    for i in range(10):
+        # ALU cluster
+        a.addi(1, 1, i)
+        a.add(2, 1, 2)
+        a._xor(3, 2, 1)
+        a.slli(4, 3, 2)
+        
+        # Memory cluster
+        a.sw(4, 20, i*4)
+        a.lw(5, 20, i*4)
+        a.add(6, 5, 4)
+        
+        # Branch (use unique label for each iteration)
+        a.bne(6, 0, f"SKIP_{i}")
+        a.addi(7, 0, 999)
+        a.label(f"SKIP_{i}")
+        
+        # Jump
+        if i % 3 == 0:
+            a.jal(8, f"CONT_{i}")
+            a.label(f"CONT_{i}")
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_memory_ordering(a: Asm):
+    """Test memory operation ordering"""
+    a.init_test()
+    a.li(20, 0x00000600, "mem base")
+    
+    # Write X, write Y, read Y, read X
+    a.li(1, 0xAAAA)
+    a.sw(1, 20, 0)   # Write X
+    a.li(2, 0xBBBB)
+    a.sw(2, 20, 4)   # Write Y
+    a.lw(3, 20, 4)   # Read Y (should see 0xBBBB)
+    a.lw(4, 20, 0)   # Read X (should see 0xAAAA)
+    a.check_reg(3, 0xBBBB, 0)
+    a.check_reg(4, 0xAAAA, 1)
+    
+    # Write-read-write same location
+    a.li(5, 0x1111)
+    a.sw(5, 20, 8)
+    a.lw(6, 20, 8)
+    a.li(7, 0x2222)
+    a.sw(7, 20, 8)
+    a.lw(8, 20, 8)
+    a.check_reg(6, 0x1111, 2)
+    a.check_reg(8, 0x2222, 3)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_power_virus(a: Asm):
+    """Maximum switching activity test"""
+    a.init_test()
+    
+    # Toggle all bits rapidly
+    for _ in range(20):
+        a.li(1, 0xAAAAAAAA)
+        a.li(2, 0x55555555)
+        a._xor(3, 1, 2)
+        a._xor(4, 2, 1)
+        a.add(5, 3, 4)
+        a.sub(6, 5, 3)
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_jalr_corner_cases(a: Asm):
+    """JALR edge cases and return address stack stress"""
+    a.init_test()
+    
+    # JALR with rd=rs1 (overwrites return address)
+    a.jal(1, "TARGET1")
+    a.label("RETURN1")
+    a.addi(10, 0, 1)
+    a.jal(0, "END")
+    
+    a.label("TARGET1")
+    a.jalr(1, 1, 0)  # rd=rs1, should still work
+    
+    # JALR with offset
+    a.label("TARGET2")
+    a.auipc(2, 0)
+    a.addi(2, 2, 12)  # Point 12 bytes ahead
+    a.jalr(3, 2, 0)
+    a.addi(10, 0, 999)  # poison
+    
+    a.label("END")
+    a.check_reg(10, 1, 0)
+    a.finalize_test(expected_x31=0)
+
+def prog_pipeline_flushes(a: Asm):
+    """Test scenarios that cause pipeline flushes"""
+    a.init_test()
+    
+    # Mispredicted branch followed by dependent load
+    a.li(20, 0x00000800, "mem base")
+    a.addi(1, 0, 10)
+    a.beq(1, 0, "SKIP")  # Not taken, may mispredict
+    a.sw(1, 20, 0)
+    a.label("SKIP")
+    a.lw(2, 20, 0)
+    a.check_reg(2, 10, 0)
+    
+    # Jump after branch
+    a.addi(3, 0, 5)
+    a.bne(3, 0, "TARGET")
+    a.addi(4, 0, 999)
+    a.label("TARGET")
+    a.jal(0, "CONT")
+    a.addi(4, 0, 999)
+    a.label("CONT")
+    
+    a.finalize_test(expected_x31=0)
+
+def prog_binary_search(a: Asm):
+    """Binary search algorithm"""
+    a.init_test()
+    a.li(20, 0x00000900, "array base")
+    
+    # Sorted array: [1, 3, 5, 7, 9, 11, 13, 15]
+    for i, val in enumerate([1, 3, 5, 7, 9, 11, 13, 15]):
+        a.li(1, val)
+        a.sw(1, 20, i * 4)
+    
+    # Search for 9 (index 4)
+    a.addi(2, 0, 9)   # target
+    a.addi(3, 0, 0)   # left
+    a.addi(4, 0, 7)   # right
+    
+    a.label("BSEARCH")
+    a.bge(3, 4, "NOT_FOUND")
+    
+    # mid = (left + right) / 2
+    a.add(5, 3, 4)
+    a.srli(5, 5, 1)
+    
+    # Load arr[mid]
+    a.slli(6, 5, 2)
+    a.add(6, 20, 6)
+    a.lw(7, 6, 0)
+    
+    # Compare
+    a.beq(7, 2, "FOUND")
+    a.blt(7, 2, "GO_RIGHT")
+    # Go left
+    a.addi(4, 5, -1)
+    a.jal(0, "BSEARCH")
+    
+    a.label("GO_RIGHT")
+    a.addi(3, 5, 1)
+    a.jal(0, "BSEARCH")
+    
+    a.label("FOUND")
+    a.add(10, 5, 0)  # Store found index
+    a.jal(0, "END")
+    
+    a.label("NOT_FOUND")
+    a.addi(10, 0, -1)
+    
+    a.label("END")
+    a.check_reg(10, 4, 0)
+    a.finalize_test(expected_x31=0)
+
 # ==========================================
 # ADD TO TESTS DICTIONARY
 # ==========================================
@@ -2112,6 +2334,14 @@ TESTS: Dict[str, Tuple[str, Callable[[Asm], None]]] = {
     "bubble_sort": ("Bubble sort algorithm", prog_bubble_sort),
     "factorial": ("Factorial calculation", prog_factorial),
     "gcd": ("GCD using Euclidean algorithm", prog_gcd_euclidean),
+
+    "recursive_factorial": ("Recursive factorial using stack", prog_recursive_factorial),
+    "instruction_mix": ("Diverse instruction mix for IPC measurement", prog_instruction_mix),
+    "memory_ordering": ("Memory operation ordering tests", prog_memory_ordering),
+    "power_virus": ("Maximum switching activity (power virus)", prog_power_virus),
+    "jalr_corner": ("JALR edge cases and RAS stress", prog_jalr_corner_cases),
+    "pipeline_flushes": ("Pipeline flush scenarios", prog_pipeline_flushes),
+    "binary_search": ("Binary search algorithm", prog_binary_search),
 }
 
 # -------------------------
