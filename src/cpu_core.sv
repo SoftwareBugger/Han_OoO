@@ -328,7 +328,7 @@ module cpu_core (
         // Recovery
         .recover_valid(recover_valid),
         .recover_rob_idx(recover_rob_idx),
-        .recover_epoch(global_epoch),
+        .recover_epoch(recover_entry.epoch),
 
         // Commit interface (for LSU)
         .commit_valid(commit_valid),

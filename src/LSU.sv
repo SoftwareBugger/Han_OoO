@@ -179,6 +179,20 @@ module LSU (
         end
     endfunction
 
+    function automatic logic [3:0] fw_hit_mask (
+        input mem_size_e mem_size,
+        input logic [1:0] addr_lo
+    );
+        begin
+            unique case (mem_size)
+                MSZ_B: fw_hit_mask = ~(4'b0001 << addr_lo);
+                MSZ_H: fw_hit_mask = ~(4'b0011 << {addr_lo[1],1'b0});
+                MSZ_W: fw_hit_mask = 4'b0000;
+                default: fw_hit_mask = 4'b0000;
+            endcase
+        end
+    endfunction
+
 
 
     // ============================================================
@@ -227,7 +241,7 @@ module LSU (
     // Store Queue (SQ) storage & pointers  (UNCHANGED LOGIC)
     // ============================================================
     sq_entry_t sq_entries [SQ_SIZE-1:0];
-    logic [SQ_SIZE-1:0] valid;
+    logic valid [SQ_SIZE-1:0];
 
     logic [$clog2(SQ_SIZE)-1:0] tail_ptr;
     logic [$clog2(SQ_SIZE)-1:0] last_tail_ptr;
@@ -398,23 +412,17 @@ module LSU (
     // Conservative load scheduling (wait on older stores' info)
     // ============================================================
     logic [SQ_SIZE-1:0] st_info_rdy;
+    logic [SQ_SIZE-1:0] older;
     always_comb begin
         for (int i = 0; i < SQ_SIZE; i++) begin
-            st_info_rdy[i] = sq_entries[i].addr_rdy && sq_entries[i].data_rdy;
+            older[i] = older_than(sq_entries[i].rob_idx, req_uop[1].rob_idx, commit_rob_idx);
+            st_info_rdy[i] = (sq_entries[i].addr_rdy && sq_entries[i].data_rdy && 
+                             (sq_entries[i].committed || older[i])) || (~valid[i]) || (~older[i]);
         end
     end
 
     logic all_st_info_rdy;
-    always_comb begin
-        all_st_info_rdy = 1'b1;
-        for (int i = 0; i < SQ_SIZE; i++) begin
-            if ( valid[i]
-              && !st_info_rdy[i]
-              &&  older_than(sq_entries_ordered[i].rob_idx, req_uop[1].rob_idx, commit_rob_idx)) begin
-                all_st_info_rdy = 1'b0;
-            end
-        end
-    end
+    assign all_st_info_rdy = &st_info_rdy;
 
     // ============================================================
     // Load request holding register (for non-forwarded loads waiting on dmem)
@@ -442,10 +450,12 @@ module LSU (
     // sq entries start from the head, assume SQ_SIZE is power of 2
     sq_entry_t sq_entries_ordered [SQ_SIZE-1:0];
     logic valid_ordered [SQ_SIZE-1:0];
+    logic [$clog2(SQ_SIZE)-1:0] idx_ordered [SQ_SIZE-1:0];
     always_comb begin
         for (int i = 0; i < SQ_SIZE; i++) begin
-            sq_entries_ordered[i] = sq_entries[(head_ptr + i)];
-            valid_ordered[i] = valid[(head_ptr + i)];
+            idx_ordered[i] = head_ptr + i;
+            sq_entries_ordered[i] = sq_entries[idx_ordered[i]];
+            valid_ordered[i] = valid[idx_ordered[i]];
         end 
     end
 
@@ -464,29 +474,29 @@ module LSU (
         fw_hit_comb_committed = 4'b0;
         fw_data_comb_committed = 32'b0;
 
-        unique case (agu_size[1])
-            MSZ_B: begin
-                fw_hit_comb_young = 4'b1111 << agu_addr[1][1:0];
-                fw_hit_comb_committed = 4'b1111 << agu_addr[1][1:0];
-            end
-            MSZ_H: begin
-                if (agu_addr[1][1] == 1'b0) begin
-                    fw_hit_comb_young = 4'b1100;
-                    fw_hit_comb_committed = 4'b1100;
-                end else begin
-                    fw_hit_comb_young = 4'b0011;
-                    fw_hit_comb_committed = 4'b0011;
-                end
-            end
-            MSZ_W: begin
-                fw_hit_comb_young = 4'b0000;
-                fw_hit_comb_committed = 4'b0000;
-            end
-            default: begin
-                fw_hit_comb_young = 4'b0000;
-                fw_hit_comb_committed = 4'b0000;
-            end
-        endcase
+        // unique case (agu_size[1])
+        //     MSZ_B: begin
+        //         fw_hit_comb_young = (4'b1110 << agu_addr[1][1:0]);
+        //         fw_hit_comb_committed = (4'b0001 << agu_addr[1][1:0]);
+        //     end
+        //     MSZ_H: begin
+        //         if (agu_addr[1][1] == 1'b0) begin
+        //             fw_hit_comb_young = 4'b1100;
+        //             fw_hit_comb_committed = 4'b1100;
+        //         end else begin
+        //             fw_hit_comb_young = 4'b0011;
+        //             fw_hit_comb_committed = 4'b0011;
+        //         end
+        //     end
+        //     MSZ_W: begin
+        //         fw_hit_comb_young = 4'b0000;
+        //         fw_hit_comb_committed = 4'b0000;
+        //     end
+        //     default: begin
+        //         fw_hit_comb_young = 4'b0000;
+        //         fw_hit_comb_committed = 4'b0000;
+        //     end
+        // endcase
 
         if (can_accept_load) begin
             for (int i = 0; i < SQ_SIZE; i++) begin
@@ -532,7 +542,7 @@ module LSU (
     logic fw_hit_ff;
     logic [31:0] fw_data_comb;
     logic [31:0] fw_hit_data_ff;
-    assign need_mem_load = ~(&fw_hit_comb_arr);
+    assign need_mem_load = ~(&(fw_hit_comb_arr | fw_hit_mask(agu_size[1], agu_addr[1][1:0])));
     assign fw_hit_comb_arr = fw_hit_comb_young | fw_hit_comb_committed;
     assign fw_hit_comb = |fw_hit_comb_arr;
     always_comb begin
