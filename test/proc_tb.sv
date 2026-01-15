@@ -53,7 +53,7 @@ module tb_cpu_core;
   // -------------------------
   // Program / Memory models (same as SoC_top style)
   // -------------------------
-  localparam string IMEM_HEX = "C:\\RTL\\Han_OoO\\prog.hex";
+  localparam string IMEM_HEX = "C:\\RTL\\Han_OoO\\sw\\prog.hex";
 
   imem #(
     .MEM_WORDS(8192),

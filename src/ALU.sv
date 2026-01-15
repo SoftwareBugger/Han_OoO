@@ -19,7 +19,7 @@ module ALU (
   output logic        wb_uses_rd,
   output logic [ROB_W-1:0]  wb_rob_idx,
   output logic [PHYS_W-1:0] wb_prd_new,
-  output logic [1:0]       wb_epoch,
+  output logic [EPOCH_W-1:0]       wb_epoch,
   output logic [31:0] wb_data
 );
 
@@ -106,7 +106,7 @@ module ALU (
   logic              out_uses_rd_q;
   logic [ROB_W-1:0]  out_rob_idx_q;
   logic [PHYS_W-1:0] out_prd_new_q;
-  logic [1:0]        out_epoch_q;
+  logic [EPOCH_W-1:0]        out_epoch_q;
   logic [31:0]       out_data_q;
 
   // Optional: latch class to filter wb_valid (if you want)
@@ -133,7 +133,7 @@ module ALU (
       out_uses_rd_q   <= 1'b0;
       out_rob_idx_q   <= '0;
       out_prd_new_q   <= '0;
-      out_epoch_q     <= 2'b0;
+      out_epoch_q     <= '0;
       out_data_q      <= 32'b0;
       out_uop_class_q <= UOP_ALU;
     end else begin

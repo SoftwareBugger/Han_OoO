@@ -14,7 +14,7 @@ module BRU (
   output logic        wb_valid,
   input  logic        wb_ready,
   output logic        wb_uses_rd,
-  output logic [1:0]       wb_epoch,
+  output logic [EPOCH_W-1:0]       wb_epoch,
   output logic [ROB_W-1:0]  wb_rob_idx,
   output logic [PHYS_W-1:0] wb_prd_new,
   output logic [31:0] wb_data,
@@ -103,7 +103,7 @@ module BRU (
   // WB meta
   logic [31:0]       out_pc_q;          // Store the PC
   logic              out_uses_rd_q;
-  logic [1:0]        out_epoch_q;
+  logic [EPOCH_W-1:0]        out_epoch_q;
   logic [ROB_W-1:0]  out_rob_idx_q;
   logic [PHYS_W-1:0] out_prd_new_q;
   logic [31:0]       out_wb_data_q;
@@ -138,7 +138,7 @@ module BRU (
 
       out_pc_q          <= 32'b0;
       out_uses_rd_q     <= 1'b0;
-      out_epoch_q       <= 2'b0;
+      out_epoch_q       <= '0;
       out_rob_idx_q     <= '0;
       out_prd_new_q     <= '0;
       out_wb_data_q     <= '0;

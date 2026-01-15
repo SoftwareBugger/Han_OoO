@@ -28,7 +28,7 @@ module execute (
     input  logic              stq_alloc_valid,
     output logic              stq_alloc_ready,
     input  logic [ROB_W-1:0]  stq_alloc_rob_idx,
-    input  logic [1:0]        global_epoch,
+    input  logic [EPOCH_W-1:0]        global_epoch,
 
     // -------------------------
     // Flush
@@ -40,7 +40,7 @@ module execute (
     // -------------------------
     input  logic              recover_valid,
     input  logic [ROB_W-1:0]  recover_rob_idx,
-    input  logic [1:0]        recover_epoch,
+    input  logic [EPOCH_W-1:0]        recover_epoch,
 
     // -------------------------
     // Commit interface
@@ -186,7 +186,7 @@ module execute (
     logic              alu_wb_valid;
     logic              alu_wb_ready;
     logic [ROB_W-1:0]  alu_wb_rob_idx;
-    logic [1:0]        alu_wb_epoch;
+    logic [EPOCH_W-1:0]        alu_wb_epoch;
     logic [PHYS_W-1:0] alu_wb_prd_new;
     logic [31:0]       alu_wb_pc;
     logic              alu_wb_uses_rd;
@@ -224,7 +224,7 @@ module execute (
     logic [PHYS_W-1:0] bru_wb_prd_new;
     logic [31:0]       bru_wb_pc;
     logic              bru_wb_uses_rd;
-    logic [1:0]        bru_wb_epoch;
+    logic [EPOCH_W-1:0]        bru_wb_epoch;
     logic [31:0]       bru_wb_data;
     logic              act_taken;
     logic [31:0]       target_pc;
@@ -324,7 +324,7 @@ module execute (
     logic              rob_commit_ready;
     logic              rob_commit_is_store;
     logic [ROB_W-1:0]  rob_commit_rob_idx;
-    logic [1:0]        rob_commit_epoch;
+    logic [EPOCH_W-1:0]        rob_commit_epoch;
     
     assign rob_commit_valid    = commit_valid;
     assign rob_commit_ready    = commit_ready;
@@ -338,11 +338,18 @@ module execute (
     logic              lsu_wb_valid;
     logic              lsu_wb_ready;
     logic              lsu_wb_uses_rd;
-    logic [1:0]        lsu_wb_epoch;
+    logic [EPOCH_W-1:0]        lsu_wb_epoch;
     logic [ROB_W-1:0]  lsu_wb_rob_idx;
     logic [PHYS_W-1:0] lsu_wb_prd_new;
     logic [31:0]       lsu_wb_data;
     logic [31:0]       lsu_wb_pc;
+
+    logic              lsu_wb_valid_st;
+    logic              lsu_wb_ready_st;
+    logic [ROB_W-1:0]  lsu_wb_rob_idx_st;
+    logic [EPOCH_W-1:0]        lsu_wb_epoch_st;
+    logic [31:0]       lsu_wb_pc_st;
+
 
     LSU lsu_u (
         .clk               (clk),
@@ -391,7 +398,13 @@ module execute (
         .wb_rob_idx        (lsu_wb_rob_idx),
         .wb_prd_new        (lsu_wb_prd_new),
         .wb_pc             (lsu_wb_pc),
-        .wb_data           (lsu_wb_data)
+        .wb_data           (lsu_wb_data),
+
+        .wb_valid_st       (lsu_wb_valid_st),
+        .wb_ready_st       (lsu_wb_ready_st),
+        .wb_rob_idx_st     (lsu_wb_rob_idx_st),
+        .wb_epoch_st       (lsu_wb_epoch_st),
+        .wb_pc_st          (lsu_wb_pc_st)
     );
 
     // -------------------------
@@ -436,6 +449,13 @@ module execute (
         .lsu_wb_epoch      (lsu_wb_epoch),
         .lsu_wb_uses_rd    (lsu_wb_uses_rd),
         .lsu_wb_pc         (lsu_wb_pc),
+
+        // LSU store writeback
+        .lsu_wb_valid_st   (lsu_wb_valid_st),
+        .lsu_wb_ready_st   (lsu_wb_ready_st),
+        .lsu_wb_rob_idx_st (lsu_wb_rob_idx_st),
+        .lsu_wb_epoch_st   (lsu_wb_epoch_st),
+        .lsu_wb_pc_st      (lsu_wb_pc_st),
 
         // To ROB + PRF
         .wb_valid          (wb_valid),

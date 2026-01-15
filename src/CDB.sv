@@ -23,7 +23,7 @@ module CDB (
     input  logic [PHYS_W-1:0] alu_wb_prd_new,
     input  logic [31:0]       alu_wb_data,
     input  logic [31:0]       alu_wb_pc,
-    input  logic [1:0]        alu_wb_epoch,
+    input  logic [EPOCH_W-1:0]        alu_wb_epoch,
     input  logic              alu_wb_uses_rd,
 
     // -----------------------------
@@ -35,7 +35,7 @@ module CDB (
     input  logic [ROB_W-1:0]  bru_wb_rob_idx,
     input  logic [PHYS_W-1:0] bru_wb_prd_new,
     input  logic [31:0]       bru_wb_data,
-    input  logic [1:0]        bru_wb_epoch,
+    input  logic [EPOCH_W-1:0]        bru_wb_epoch,
     input  logic              bru_wb_uses_rd,
     input  logic [31:0]       bru_wb_pc,
 
@@ -52,9 +52,18 @@ module CDB (
     input  logic [ROB_W-1:0]  lsu_wb_rob_idx,
     input  logic [PHYS_W-1:0] lsu_wb_prd_new,
     input  logic [31:0]       lsu_wb_data,
-    input  logic [1:0]        lsu_wb_epoch,
+    input  logic [EPOCH_W-1:0]        lsu_wb_epoch,
     input  logic              lsu_wb_uses_rd,
     input  logic [31:0]       lsu_wb_pc,
+
+    // -----------------------------
+    // LSU writeback (stores) (completion == wb_valid_st)
+    // -----------------------------
+    input  logic              lsu_wb_valid_st,
+    output logic              lsu_wb_ready_st,
+    input  logic [ROB_W-1:0]  lsu_wb_rob_idx_st,
+    input  logic [EPOCH_W-1:0]        lsu_wb_epoch_st,
+    input  logic [31:0]       lsu_wb_pc_st,
 
     // Optional LSU info (tie off to 0 if unused)
     input  logic              lsu_is_load,
@@ -73,11 +82,12 @@ module CDB (
     // ============================================================
     // Arbitration (BRU > LSU > ALU)
     // ============================================================
-    typedef enum logic [1:0] {
-        SEL_NONE = 2'd0,
-        SEL_BRU  = 2'd1,
-        SEL_LSU  = 2'd2,
-        SEL_ALU  = 2'd3
+    typedef enum logic [2:0] {
+        SEL_NONE = 3'd0,
+        SEL_BRU  = 3'd1,
+        SEL_ST  = 3'd2,
+        SEL_LD  = 3'd3,
+        SEL_ALU  = 3'd4
     } sel_e;
 
     sel_e sel;
@@ -85,7 +95,8 @@ module CDB (
     always_comb begin
         sel = SEL_NONE;
         if      (bru_wb_valid) sel = SEL_BRU;
-        else if (lsu_wb_valid)  sel = SEL_LSU;
+        else if (lsu_wb_valid_st) sel = SEL_ST; // Give store WB higher priority than load WB
+        else if (lsu_wb_valid)  sel = SEL_LD;
         else if (alu_wb_valid)  sel = SEL_ALU;
         else                    sel = SEL_NONE;
     end
@@ -127,7 +138,35 @@ module CDB (
                 wb_pkt.pc          = bru_wb_pc;
             end
 
-            SEL_LSU: begin
+            SEL_ST: begin
+                wb_valid          = lsu_wb_valid_st;
+
+                wb_pkt.rob_idx    = lsu_wb_rob_idx_st;
+                wb_pkt.epoch      = lsu_wb_epoch_st;
+
+                wb_pkt.done       = 1'b1;
+
+                wb_pkt.uses_rd    = 1'b0;
+                wb_pkt.prd_new    = '0;
+                wb_pkt.data       = 32'b0;
+                wb_pkt.data_valid = 1'b0;
+
+                // Branch fields unused
+                wb_pkt.is_branch   = 1'b0;
+                wb_pkt.mispredict  = 1'b0;
+                wb_pkt.redirect    = 1'b0;
+                wb_pkt.redirect_pc = 32'b0;
+                wb_pkt.act_taken   = 1'b0;
+
+                // Optional LSU info
+                wb_pkt.is_load     = 1'b0;
+                wb_pkt.is_store    = 1'b1;
+                wb_pkt.mem_exc     = 1'b0;
+                wb_pkt.mem_addr    = 32'b0;
+                wb_pkt.pc          = lsu_wb_pc_st;
+            end
+
+            SEL_LD: begin
                 wb_valid          = lsu_wb_valid;
 
                 wb_pkt.rob_idx    = lsu_wb_rob_idx;
@@ -149,8 +188,8 @@ module CDB (
                 wb_pkt.act_taken   = 1'b0;
 
                 // Optional LSU info
-                wb_pkt.is_load     = lsu_is_load;
-                wb_pkt.is_store    = lsu_is_store;
+                wb_pkt.is_load     = 1'b1;
+                wb_pkt.is_store    = 1'b0;
                 wb_pkt.mem_exc     = lsu_mem_exc;
                 wb_pkt.mem_addr    = lsu_mem_addr;
                 wb_pkt.pc          = lsu_wb_pc;
@@ -197,7 +236,8 @@ module CDB (
     //  - For BRU, we gate with bru_wb_valid selection (br_valid).
     // ============================================================
     assign bru_wb_ready = (sel == SEL_BRU) && wb_ready;
-    assign lsu_wb_ready = (sel == SEL_LSU) && wb_ready;
+    assign lsu_wb_ready = (sel == SEL_LD) && wb_ready;
     assign alu_wb_ready = (sel == SEL_ALU) && wb_ready;
+    assign lsu_wb_ready_st = (sel == SEL_ST) && wb_ready;
 
 endmodule

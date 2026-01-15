@@ -35,7 +35,7 @@ module LSU (
     input  logic        commit_ready,
     input  logic        commit_is_store,
     input  logic [ROB_W-1:0] commit_rob_idx,
-    input  logic [1:0]       commit_epoch,
+    input  logic [EPOCH_W-1:0]       commit_epoch,
 
     // Flush control (from ROB / trap)
     input  logic        flush_valid,
@@ -43,7 +43,7 @@ module LSU (
     // Recovery interface (from ROB branch mispredict)
     input  logic        recover_valid,
     input  logic [ROB_W-1:0] recover_rob_idx,
-    input  logic [1:0]       recover_epoch,
+    input  logic [EPOCH_W-1:0]       recover_epoch,
 
     // memory interface
     dmem_if.master  dmem,
@@ -52,11 +52,18 @@ module LSU (
     output logic        wb_valid,
     input  logic        wb_ready,
     output logic        wb_uses_rd,
-    output logic [1:0]       wb_epoch,
+    output logic [EPOCH_W-1:0]       wb_epoch,
     output logic [ROB_W-1:0]  wb_rob_idx,
     output logic [PHYS_W-1:0] wb_prd_new,
     output logic [31:0]       wb_pc,
-    output logic [31:0] wb_data
+    output logic [31:0] wb_data,
+
+    output logic        wb_valid_st,
+    input  logic        wb_ready_st,
+    output logic        wb_uses_rd_st,
+    output logic [EPOCH_W-1:0]       wb_epoch_st,
+    output logic [ROB_W-1:0]  wb_rob_idx_st,
+    output logic [31:0]       wb_pc_st
 );
 
     // ============================================================
@@ -226,7 +233,7 @@ module LSU (
 
     // Store "execute" identity (used to fill an existing SQ entry)
     logic [ROB_W-1:0] st_rob_idx;
-    logic [1:0]            st_epoch;
+    logic [EPOCH_W-1:0]            st_epoch;
     logic [31:0]      mem_addr;
     logic [31:0]      mem_data;
     logic             st_valid;
@@ -279,13 +286,13 @@ module LSU (
     logic        ld_unsigned_q;
     logic [ROB_W-1:0]  ld_rob_q;
     logic [PHYS_W-1:0] ld_prd_q;
-    logic [1:0]            ld_epoch_q;
+    logic [EPOCH_W-1:0]            ld_epoch_q;
 
     logic        wb_buf_valid;
     logic [31:0] wb_buf_data;
     logic [ROB_W-1:0]  wb_buf_rob_idx;
     logic [PHYS_W-1:0] wb_buf_prd_new;
-    logic [1:0]        wb_buf_epoch;
+    logic [EPOCH_W-1:0]        wb_buf_epoch;
     logic        wb_buf_uses_rd;
     logic        wb_fire;
     logic [31:0] wb_buf_pc;
@@ -433,7 +440,7 @@ module LSU (
     logic        ld_req_unsigned;
     logic [ROB_W-1:0]  ld_req_rob;
     logic [PHYS_W-1:0] ld_req_prd;
-    logic [1:0]        ld_req_epoch;
+    logic [EPOCH_W-1:0]        ld_req_epoch;
 
     // Accept new load request if:
     // - Valid load from RS
@@ -721,7 +728,7 @@ module LSU (
     // External handshakes
     // ============================================================
     assign req_ready_ld = can_accept_load;
-    assign req_ready_st = 1'b1;
+    assign req_ready_st = wb_ready_st;
 
     assign wb_valid   = wb_buf_valid;
     assign wb_data    = wb_buf_data;
@@ -731,6 +738,9 @@ module LSU (
     assign wb_uses_rd = wb_buf_uses_rd;
     assign wb_pc      = wb_buf_pc;
 
-    
-
+    assign wb_valid_st   = req_valid_st;
+    assign wb_uses_rd_st = 1'b0;
+    assign wb_epoch_st   = req_uop[0].epoch;
+    assign wb_rob_idx_st = req_uop[0].rob_idx;
+    assign wb_pc_st      = req_uop[0].bundle.pc;
 endmodule

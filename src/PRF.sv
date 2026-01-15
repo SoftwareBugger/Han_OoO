@@ -26,7 +26,7 @@ module PRF #(
   input  logic              wb_ready,
   input  logic [PHYS_W-1:0] wb_pd,
   input  logic [DW-1:0]     wb_data,
-  input  logic [1:0]        wb_epoch,
+  input  logic [EPOCH_W-1:0]        wb_epoch,
 
   // Optional: expose all ready bits for debug
   output logic [PHYS_REGS-1:0] ready_vec
@@ -34,7 +34,7 @@ module PRF #(
 
   logic [DW-1:0] mem   [PHYS_REGS-1:0];
   logic          ready [PHYS_REGS-1:0];
-  logic [1:0]    epoch [PHYS_REGS-1:0];
+  logic [EPOCH_W-1:0]    epoch [PHYS_REGS-1:0];
 
   // Combinational reads
   always_comb begin
@@ -60,7 +60,7 @@ module PRF #(
       for (k = 0; k < PHYS_REGS; k++) begin
         mem[k]   <= '0;
         ready[k] <= 1'b1; // initial: everything ready
-        epoch[k] <= 2'b0;
+        epoch[k] <= '0;
       end
     end else begin
       // Default ordering: alloc marks not-ready, WB marks ready (WB wins if same reg)

@@ -1,6 +1,6 @@
 module imem #(
     parameter int MEM_WORDS = 16384,
-    parameter string HEXFILE = "C:\\RTL\\Han_OoO\\prog.hex",
+    parameter string HEXFILE = "C:\\RTL\\Han_OoO\\sw\\prog.hex",
     parameter int LATENCY = 1,          // cycles from req_fire to resp available
     parameter int RESP_FIFO_DEPTH = 4   // absorbs resp_ready stalls
 )(

@@ -26,6 +26,8 @@ parameter int BTB_W       = $clog2(BTB_ENTRIES);
 // You can override if you want shorter tags.
 parameter int TAG_W       = (32 - 2 - BTB_W);
 
+parameter int EPOCH_W     = 32;
+
 // -----------------------------
 // Uop classification enums
 // -----------------------------
@@ -195,7 +197,7 @@ typedef struct packed {
 
   // Identity
   logic [ROB_W-1:0] rob_idx;
-  logic [1:0]            epoch;
+  logic [EPOCH_W-1:0]            epoch;
 
   // Renamed regs (no values)
   logic [PHYS_W-1:0] prs1;
@@ -211,7 +213,7 @@ typedef struct packed {
 typedef struct packed {
     logic        valid;
     logic        done;
-    logic [1:0]  epoch;
+    logic [EPOCH_W-1:0]  epoch;
 
     logic        uses_rd;
     logic [4:0]  rd_arch;
@@ -256,7 +258,7 @@ endfunction
 typedef struct packed {
   // Identity
   logic [ROB_W-1:0]  rob_idx;
-  logic [1:0]            epoch;
+  logic [EPOCH_W-1:0]            epoch;
 
   // Destination
   logic              uses_rd;
@@ -285,7 +287,7 @@ typedef struct packed {
 // -----------------------------
 // LSQ sizing
 // -----------------------------
-parameter int SQ_SIZE = 16;
+parameter int SQ_SIZE = 8;
 parameter int LQ_SIZE = 16;
 
 parameter int SQ_W = $clog2(SQ_SIZE);
@@ -300,7 +302,7 @@ parameter int SQ_W = $clog2(SQ_SIZE);
 typedef struct packed {
   // Ordering / recovery
   logic [ROB_W-1:0]  rob_idx;     // for "older-than" checks + commit ordering
-  logic [1:0]            epoch;       // squash wrong-path stores on mispredict
+  logic [EPOCH_W-1:0]            epoch;       // squash wrong-path stores on mispredict
 
   // Store attributes
   mem_size_e         mem_size;    // byte/half/word

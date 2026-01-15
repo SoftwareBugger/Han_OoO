@@ -20,7 +20,7 @@ module commit_dispatch_sys #(
 
     //input  logic [PHYS_W-1:0] alloc_pd_new,
     //input  logic [PHYS_W-1:0] alloc_pd_old,
-    input  logic [1:0]       alloc_epoch,
+    input  logic [EPOCH_W-1:0]       alloc_epoch,
 
     output logic [ROB_W-1:0] alloc_rob_idx,
 
@@ -38,7 +38,7 @@ module commit_dispatch_sys #(
     input  logic        wb_valid,
     output logic        wb_ready,
     input  logic [ROB_W-1:0] wb_rob_idx,
-    input  logic [1:0]       wb_epoch,
+    input  logic [EPOCH_W-1:0]       wb_epoch,
     input  logic       wb_mispredict,
     input  logic [PHYS_W-1:0] wb_pd,
     input  logic [31:0] wb_data,
@@ -63,7 +63,7 @@ module commit_dispatch_sys #(
      * ========================= */
     input  logic        flush_valid,
     input  logic [ROB_W-1:0] flush_rob_idx,
-    input  logic [1:0]       flush_epoch,
+    input  logic [EPOCH_W-1:0]       flush_epoch,
 
     /* =========================
      * architectural registers
@@ -97,7 +97,7 @@ module commit_dispatch_sys #(
     /* =========================
      * epoch management
      * ========================= */
-    logic [1:0]       global_epoch;
+    logic [EPOCH_W-1:0]       global_epoch;
 
 
     // Freelist instance

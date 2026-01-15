@@ -67,12 +67,12 @@ module cpu_core (
      * ========================= */
     logic flush_valid;
     logic [ROB_W-1:0] flush_rob_idx;
-    logic [1:0] flush_epoch;
+    logic [EPOCH_W-1:0] flush_epoch;
 
     /* =========================
      * Epoch tracking
      * ========================= */
-    logic [1:0] global_epoch;
+    logic [EPOCH_W-1:0] global_epoch;
 
     /* =========================
      * Writeback signals (from execute/CDB)
@@ -109,7 +109,7 @@ module cpu_core (
     
     logic prf_recovery_alloc_valid;
     logic [PHYS_W-1:0] prf_recovery_alloc_pd_new;
-    logic [1:0] prf_recovery_alloc_epoch;
+    logic [EPOCH_W-1:0] prf_recovery_alloc_epoch;
     
     logic [PHYS_REGS-1:0] prf_ready_vec;
 

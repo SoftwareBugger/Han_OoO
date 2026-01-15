@@ -41,7 +41,7 @@ module commit_rename #(
      * ========================= */
     input  logic        flush_valid,
     input  logic [ROB_W-1:0] flush_rob_idx,
-    input  logic [1:0]  flush_epoch,
+    input  logic [EPOCH_W-1:0]  flush_epoch,
 
     /* =========================
      * architectural registers (for RAT read)
@@ -68,7 +68,7 @@ module commit_rename #(
     /* =========================
      * Epoch management
      * ========================= */
-    output logic [1:0]  global_epoch
+    output logic [EPOCH_W-1:0]  global_epoch
 );
 
     /* =========================

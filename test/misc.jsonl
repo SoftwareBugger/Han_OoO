@@ -1,0 +1,17 @@
+{"type":"redirect","cycle":33,"redirect_pc":"0x00000020"}
+{"type":"recover","cycle":34,"recover_rob":8,"recover_entry_hex":"0x221941800000020"}
+{"type":"recover","cycle":35,"recover_rob":7,"recover_entry_hex":"0x20094080000001c"}
+{"type":"recover","cycle":36,"recover_rob":6,"recover_entry_hex":"0x225922000000018"}
+{"type":"recover","cycle":37,"recover_rob":5,"recover_entry_hex":"0x300900100000014"}
+{"type":"redirect","cycle":42,"redirect_pc":"0x000000b4"}
+{"type":"recover","cycle":43,"recover_rob":7,"recover_entry_hex":"0x2e29e1000000028"}
+{"type":"recover","cycle":44,"recover_rob":6,"recover_entry_hex":"0x2c09c0800000024"}
+{"type":"redirect","cycle":60,"redirect_pc":"0x00000100"}
+{"type":"recover","cycle":61,"recover_rob":1,"recover_entry_hex":"0x2afbaa2000000e0"}
+{"type":"recover","cycle":62,"recover_rob":0,"recover_entry_hex":"0x2aeb6c2000000dc"}
+{"type":"redirect","cycle":73,"redirect_pc":"0x00000220"}
+{"type":"recover","cycle":74,"recover_rob":6,"recover_entry_hex":"0x2efcb0000000118"}
+{"type":"recover","cycle":75,"recover_rob":5,"recover_entry_hex":"0x2eec6f200000114"}
+{"type":"redirect","cycle":76,"redirect_pc":"0x000000dc"}
+{"type":"recover","cycle":77,"recover_rob":4,"recover_entry_hex":"0x3c0c40c00000110"}
+{"type":"recover","cycle":78,"recover_rob":3,"recover_entry_hex":"0x3c8c6910000010c"}

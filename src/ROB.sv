@@ -46,7 +46,7 @@ module ROB #(
      * ========================= */
     input  logic           flush_valid,
     input  logic [ROB_W_P-1:0] flush_rob_idx,       // currently unused (kept for future selective flush)
-    input  logic [1:0]        flush_epoch,        // currently unused (kept for future selective flush)
+    input  logic [EPOCH_W-1:0]        flush_epoch,        // currently unused (kept for future selective flush)
 
     /* =========================
      * Recovery (from branch mispredict handling inside ROB)
@@ -59,7 +59,7 @@ module ROB #(
     /* =========================
      * Epoch management
      * ========================= */
-    output logic [1:0]     global_epoch
+    output logic [EPOCH_W-1:0]     global_epoch
 );
 
     // -----------------------------
@@ -78,7 +78,7 @@ module ROB #(
      * Storage
      * ========================= */
     rob_entry_t rob_mem [ROB_SIZE_P];
-    logic [ROB_SIZE_P-1:0] rob_br_finished;
+    // logic [ROB_SIZE_P-1:0] rob_br_finished;
 
     logic [ROB_W_P-1:0] head_ptr;
     logic [ROB_W_P-1:0] tail_ptr;
@@ -116,7 +116,7 @@ module ROB #(
             for (int i = 0; i < ROB_SIZE_P; i++) begin
                 rob_mem[i] <= '0;
             end
-            rob_br_finished <= '1;
+            // rob_br_finished <= '1;
         end else if (flush_valid) begin
             head_ptr <= '0;
             tail_ptr <= '0;
@@ -125,7 +125,7 @@ module ROB #(
                 rob_mem[i].valid <= 1'b0;
                 rob_mem[i].done  <= 1'b0;
             end
-            rob_br_finished <= '1;
+            // rob_br_finished <= '1;
         end else if (~recover_valid) begin
             // =====================
             // Writeback
@@ -136,8 +136,8 @@ module ROB #(
                     rob_mem[wb_pkt.rob_idx].done <= 1'b1;
                     // Only meaningful for branches; keep 0 otherwise.
                     rob_mem[wb_pkt.rob_idx].mispredict <= (wb_pkt.is_branch && wb_pkt.mispredict);
-                    rob_br_finished[wb_pkt.rob_idx] <= rob_mem[wb_pkt.rob_idx].is_branch ? 1'b1
-                                                                                           : rob_br_finished[wb_pkt.rob_idx];
+                    // rob_br_finished[wb_pkt.rob_idx] <= rob_mem[wb_pkt.rob_idx].is_branch ? 1'b1
+                                                                                        //    : rob_br_finished[wb_pkt.rob_idx];
                 end
             end
 
@@ -147,7 +147,7 @@ module ROB #(
             if (commit_fire) begin
                 rob_mem[head_ptr].valid <= 1'b0;
                 rob_mem[head_ptr].done  <= 1'b0;
-                rob_br_finished[head_ptr] <= 1'b1;
+                // rob_br_finished[head_ptr] <= 1'b1;
             end
 
             // =====================
@@ -171,7 +171,7 @@ module ROB #(
                 rob_mem[tail_ptr].pc        <= alloc_bundle.pc;
 
                 // Only branches participate in the "all branches finished" barrier.
-                rob_br_finished[tail_ptr]   <= alloc_is_branch ? 1'b0 : 1'b1;
+                // rob_br_finished[tail_ptr]   <= alloc_is_branch ? 1'b0 : 1'b1;
             end
 
             // =====================
@@ -198,7 +198,7 @@ module ROB #(
             count    <= count - 1'b1;
             rob_mem[tail_ptr - 1'b1].valid <= 1'b0;
             rob_mem[tail_ptr - 1'b1].done  <= 1'b0;
-            rob_br_finished[tail_ptr - 1'b1] <= 1'b1;
+            // rob_br_finished[tail_ptr - 1'b1] <= 1'b1;
         end
     end
 
@@ -214,7 +214,7 @@ module ROB #(
         (count != 0) &&
         rob_mem[head_ptr].valid &&
         (!recover_valid) &&
-        (rob_mem[head_ptr].is_store ? (&rob_br_finished) : rob_mem[head_ptr].done);
+        (rob_mem[head_ptr].is_store || rob_mem[head_ptr].done);
 
     // Compact commit payload
     always_comb begin
@@ -286,11 +286,11 @@ module ROB #(
      * ========================= */
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            global_epoch <= 2'b0;
+            global_epoch <= '0;
         end else if (flush_valid) begin
-            global_epoch <= 2'b0;
+            global_epoch <= '0;
         end else if (wb_mispredict_fire) begin
-            global_epoch <= global_epoch + 2'b01;
+            global_epoch <= global_epoch + {{(EPOCH_W-1){1'b0}}, 1'b1};
         end
     end
 
