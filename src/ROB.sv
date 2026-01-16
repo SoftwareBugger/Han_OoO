@@ -228,6 +228,7 @@ module ROB #(
     // "wb mispredict" event (only when the wb matches the ROB entry's epoch)
     assign wb_mispredict_fire =
         (wb_valid &&
+        wb_ready &&
         wb_pkt.is_branch &&
         rob_mem[wb_pkt.rob_idx].valid &&
         (rob_mem[wb_pkt.rob_idx].epoch == wb_pkt.epoch) &&
@@ -289,7 +290,7 @@ module ROB #(
             global_epoch <= '0;
         end else if (flush_valid) begin
             global_epoch <= '0;
-        end else if (wb_mispredict_fire) begin
+        end else if (wb_mispredict_fire || (alloc_fire && alloc_rob_idx == {(ROB_W_P){1'b1}})) begin
             global_epoch <= global_epoch + {{(EPOCH_W-1){1'b0}}, 1'b1};
         end
     end

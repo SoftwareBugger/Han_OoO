@@ -151,14 +151,11 @@ module LSU (
     function automatic logic older_than(
         input logic [ROB_W-1:0] a,
         input logic [ROB_W-1:0] b,
-        input logic [ROB_W-1:0] head
+        input logic [EPOCH_W-1:0] a_epoch,
+        input logic [EPOCH_W-1:0] b_epoch
     );
-        logic [ROB_W-1:0] ra, rb;
-        begin
-            ra = a - head;   // wraps naturally in K bits
-            rb = b - head;
-            return (ra < rb);
-        end
+        return ((a_epoch < b_epoch) || 
+                ((a_epoch == b_epoch) && (a < b)));
     endfunction
 
     function automatic logic [3:0] byte_mask_32(
@@ -242,7 +239,7 @@ module LSU (
     assign st_epoch   = req_uop[0].epoch;
     assign mem_addr   = agu_addr[0];
     assign mem_data   = agu_data;
-    assign st_valid   = is_store_req;
+    assign st_valid   = is_store_req && req_ready_st && req_valid_st;
 
     // ============================================================
     // Store Queue (SQ) storage & pointers  (UNCHANGED LOGIC)
@@ -376,8 +373,8 @@ module LSU (
             end
 
             unique case ({sq_entry_in_fire, mem_wr_fire})
-                2'b10: count <= count + 1;
-                2'b01: count <= count - 1;
+                2'b10: count <= (count != SQ_SIZE) ? count + 1 : count; // push only
+                2'b01: count <= (count != 0) ? count - 1 : count; // pop only
                 default: count <= count;
             endcase
 
@@ -422,7 +419,7 @@ module LSU (
     logic [SQ_SIZE-1:0] older;
     always_comb begin
         for (int i = 0; i < SQ_SIZE; i++) begin
-            older[i] = older_than(sq_entries[i].rob_idx, req_uop[1].rob_idx, commit_rob_idx);
+            older[i] = older_than(sq_entries[i].rob_idx, req_uop[1].rob_idx, sq_entries[i].epoch, req_uop[1].epoch);
             st_info_rdy[i] = (sq_entries[i].addr_rdy && sq_entries[i].data_rdy && 
                              (sq_entries[i].committed || older[i])) || (~valid[i]) || (~older[i]);
         end
@@ -452,7 +449,7 @@ module LSU (
                             !ld_req_valid && 
                             all_st_info_rdy && 
                             (!wb_buf_valid || wb_fire) &&
-                            !ld_busy;
+                            !ld_busy && (~recover_valid) && (~flush_valid);
 
     // sq entries start from the head, assume SQ_SIZE is power of 2
     sq_entry_t sq_entries_ordered [SQ_SIZE-1:0];
@@ -514,7 +511,7 @@ module LSU (
                     sq_entries_ordered[i].data_rdy &&
                     (sq_entries_ordered[i].addr[31:2] == agu_addr[1][31:2]) &&
                     (|overlap_mask[i]) &&
-                    older_than(sq_entries_ordered[i].rob_idx, req_uop[1].rob_idx, commit_rob_idx)) begin
+                    older[idx_ordered[i]]) begin
                     // Younger store words match
                     for (int b = 0; b < 4; b++) begin
                         if (overlap_mask[i][b]) begin

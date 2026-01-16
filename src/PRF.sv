@@ -19,7 +19,7 @@ module PRF #(
   // Rename alloc & recovery: mark destination not-ready
   input  logic              recovery_alloc_valid,
   input  logic [PHYS_W-1:0] recovery_alloc_pd_new,
-  input  logic [1:0]        recovery_alloc_epoch,
+  input  logic [EPOCH_W-1:0]        recovery_alloc_epoch,
 
   // Writeback: write data and mark ready
   input  logic              wb_valid,
@@ -70,7 +70,7 @@ module PRF #(
       end 
       if (wb_valid && wb_ready && (epoch[wb_pd] == wb_epoch)) begin
         mem[wb_pd]   <= wb_data;
-        ready[wb_pd] <= 1'b1;
+        ready[wb_pd] <= (recovery_alloc_valid && (recovery_alloc_pd_new == wb_pd)) ? 1'b0 : 1'b1;
       end
     end
   end

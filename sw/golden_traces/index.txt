@@ -1,0 +1,9 @@
+# pattern=build/*.hex
+# max_steps=300000
+# name  trace_file  final_x31
+main  main.truth  0x00000000
+t01_partial_store_load_forwarding  t01_partial_store_load_forwarding.truth  0x00000000
+t02_abi_calls  t02_abi_calls.truth  0x00000000
+t03_st_queue_pressure  t03_st_queue_pressure.truth  0x00000000
+t04_branch_loaduse  t04_branch_loaduse.truth  0x00000000
+t05_wrong_path_stores  t05_wrong_path_stores.truth  0x00000000

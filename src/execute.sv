@@ -90,6 +90,7 @@ module execute (
 
         // Wakeup from CDB - use actual writeback signals
         .wb_valid(wb_valid && wb_pkt.uses_rd && wb_pkt.data_valid),
+        .wb_ready(wb_ready),
         .wb_pd(wb_pkt.prd_new),
 
         .issue_valid(issue_valid),
@@ -112,62 +113,72 @@ module execute (
     logic fu_req_ready [FU_NUM-1:0];
     rs_uop_t           fu_req_uop [FU_NUM-1:0];
 
-    logic pipe_v [FU_NUM-1:0];
-    rs_uop_t           pipe_uop [FU_NUM-1:0];
-
-    logic  pop [FU_NUM-1:0];
-    logic  push [FU_NUM-1:0];
-    genvar i;
-    generate
-        for (i = 0; i < FU_NUM; i++) begin
-            // FU sees what is in the pipe
-            assign fu_req_valid[i] = pipe_v[i];
-            assign fu_req_uop[i]   = pipe_uop[i];
-            // RS sees ready if pipeline empty or popping this cycle
-            // Pipeline push/pop logic
-            assign pop[i]  = (fu_req_ready[i] & pipe_v[i]);
-            assign issue_ready[i] = (~pipe_v[i] | pop[i]);
-            assign push[i] = (issue_valid[i] & issue_ready[i]);
-        end
-    endgenerate
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            for (int i = 0; i < FU_NUM; i++) begin
-                pipe_v[i] <= 1'b0;
-                pipe_uop[i] <= '0;
-            end
-        end else begin
-            // Kill all issued-but-not-executed ops on flush or recovery
-            if (flush_valid) begin
-                for (int i = 0; i < FU_NUM; i++) begin
-                    pipe_v[i] <= 1'b0;
-                    pipe_uop[i] <= '0;
-                end
-            end else begin
-                for (int i = 0; i < FU_NUM; i++) begin
-                    unique case ({push[i], pop[i]})
-                        2'b10: begin // push
-                            pipe_v[i]   <= 1'b1;
-                            pipe_uop[i] <= issue_uop[i];
-                        end
-                        2'b01: begin // pop
-                            pipe_v[i] <= 1'b0;
-                        end
-                        2'b11: begin // replace
-                            pipe_v[i]   <= 1'b1;
-                            pipe_uop[i] <= issue_uop[i];
-                        end
-                        default: begin 
-                            // hold
-                            pipe_v[i]   <= pipe_v[i];
-                            pipe_uop[i] <= pipe_uop[i];
-                        end
-                    endcase
-                end
-            end
+    always_comb begin
+        for (int i = 0; i < FU_NUM; i++) begin
+            issue_ready[i] <= fu_req_ready[i];
+            fu_req_valid[i] <= issue_valid[i];
+            fu_req_uop[i]   <= issue_uop[i];
         end
     end
+
+    // logic pipe_v [FU_NUM-1:0];
+    // rs_uop_t           pipe_uop [FU_NUM-1:0];
+
+    // logic  pop [FU_NUM-1:0];
+    // logic  push [FU_NUM-1:0];
+    // genvar i;
+    // generate
+    //     for (i = 0; i < FU_NUM; i++) begin
+    //         // FU sees what is in the pipe
+    //         assign fu_req_valid[i] = pipe_v[i];
+    //         assign fu_req_uop[i]   = pipe_uop[i];
+    //         // RS sees ready if pipeline empty or popping this cycle
+    //         // Pipeline push/pop logic
+    //         assign pop[i]  = (fu_req_ready[i] & pipe_v[i]);
+    //         assign issue_ready[i] = (~pipe_v[i] | pop[i]);
+    //         assign push[i] = (issue_valid[i] & issue_ready[i]);
+    //     end
+    // endgenerate
+
+    // always_ff @(posedge clk or negedge rst_n) begin
+    //     if (!rst_n) begin
+    //         for (int i = 0; i < FU_NUM; i++) begin
+    //             pipe_v[i] <= 1'b0;
+    //             pipe_uop[i] <= '0;
+    //         end
+    //     end else begin
+    //         // Kill all issued-but-not-executed ops on flush or recovery
+    //         if (flush_valid) begin
+    //             for (int i = 0; i < FU_NUM; i++) begin
+    //                 pipe_v[i] <= 1'b0;
+    //                 pipe_uop[i] <= '0;
+    //             end
+    //         end else begin
+    //             for (int i = 0; i < FU_NUM; i++) begin
+    //                 unique case ({push[i], pop[i]})
+    //                     2'b10: begin // push
+    //                         pipe_v[i]   <= 1'b1;
+    //                         pipe_uop[i] <= issue_uop[i];
+    //                     end
+    //                     2'b01: begin // pop
+    //                         pipe_v[i] <= 1'b0;
+    //                     end
+    //                     2'b11: begin // replace
+    //                         pipe_v[i]   <= 1'b1;
+    //                         pipe_uop[i] <= issue_uop[i];
+    //                     end
+    //                     default: begin 
+    //                         // hold
+    //                         pipe_v[i]   <= pipe_v[i];
+    //                         pipe_uop[i] <= pipe_uop[i];
+    //                     end
+    //                 endcase
+    //             end
+    //         end
+    //     end
+    // end
+
+
     // -------------------------------------------------------
     // PRF read address drive (read operands as ops are issued)
     // -------------------------------------------------------

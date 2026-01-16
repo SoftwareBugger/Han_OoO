@@ -105,7 +105,7 @@ module cpu_core (
     logic prf_wb_valid;
     logic [PHYS_W-1:0] prf_wb_pd;
     logic [31:0] prf_wb_data;
-    logic [1:0] prf_wb_epoch;
+    logic [EPOCH_W-1:0] prf_wb_epoch;
     
     logic prf_recovery_alloc_valid;
     logic [PHYS_W-1:0] prf_recovery_alloc_pd_new;
