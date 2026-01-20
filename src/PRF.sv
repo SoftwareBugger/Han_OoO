@@ -55,7 +55,7 @@ module PRF #(
   endgenerate
 
   integer k;
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       for (k = 0; k < PHYS_REGS; k++) begin
         mem[k]   <= '0;

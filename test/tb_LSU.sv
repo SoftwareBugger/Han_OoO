@@ -159,7 +159,7 @@ module tb_lsu;
 
   ld_pipe_t ldq;
 
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       dmem.ld_ready      <= 1'b0;
       dmem.st_ready      <= 1'b0;
@@ -347,7 +347,7 @@ module tb_lsu;
 
   // Randomized WB backpressure
   int unsigned WB_STALL_PCT = 20;
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       wb_ready <= 1'b1;
     end else begin
@@ -618,7 +618,7 @@ module tb_lsu;
   logic [ROB_W-1:0] killed_rob;
   logic track_killed;
   
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       track_killed <= 1'b0;
     end else begin

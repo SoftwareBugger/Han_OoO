@@ -54,7 +54,7 @@ module RAT #(
      * Sequential update
      * ========================= */
     integer i;
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             // identity map on reset
             for (i = 0; i < ARCH_REGS; i++)

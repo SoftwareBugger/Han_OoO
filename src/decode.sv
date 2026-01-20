@@ -285,7 +285,7 @@ module decode (
   // accept from fetch on handshake
   wire out_enq_fire   = fetch_valid && fetch_ready;
 
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       out_vld_q <= 1'b0;
       out_d_q   <= 'd0;
@@ -308,7 +308,7 @@ module decode (
   end
 
   logic [2:0] decode_epoch;
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       decode_epoch <= 3'b0;
     end else if (redirect_valid) begin

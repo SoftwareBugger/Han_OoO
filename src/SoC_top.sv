@@ -1,40 +1,89 @@
-// ============================================================================
-// FPGA Top-Level Integration Example
-// ============================================================================
 module SoC_top #(
     parameter bit USE_CACHE = 0
 )(
-    input  logic clk,
-    input  logic rst_n,
-    
-    // External memory interface (e.g., AXI to DDR)
-    // ... AXI ports here ...
-    
-    // Debug/status outputs
-    output logic [7:0] status_leds
+    input  logic        clk,   // 125 MHz from Zybo Z7 PL clock pin (K17)
+    input  logic [3:0]  sw,
+    input  logic [3:0]  btn,
+    output logic [3:0]  led
 );
 
-    // Internal interfaces
-    dmem_if #(.LDTAG_W(4)) dmem_cpu();
-    dmem_if #(.LDTAG_W(4)) dmem_backing();
-    imem_if imem();
+    // ================================================================
+    // 1) Raw reset request from button (active-low)
+    // ================================================================
+    logic rst_req_n;
+    assign rst_req_n = ~btn[0];  // pressed => 0 (assert reset request)
 
-    // CPU core instance
-    cpu_core cpu_inst (
-        .clk(clk),
-        .rst_n(rst_n),
-        .dmem(dmem_cpu),
-        .imem(imem)
+    // ================================================================
+    // 3) PLL / MMCM (Clocking Wizard)
+    //    - Input:  125 MHz (clk)
+    //    - Output: 25 MHz  (clk_25Mhz)
+    // ================================================================
+    logic clk_25Mhz;
+    logic pll_locked;
+
+    // Clocking wizard reset is typically active-high.
+    // Hold it in reset while the pushbutton reset request is asserted.
+    clk_wiz_0 u_pll (
+        .clk_25Mhz (clk_25Mhz),
+        .reset     (~rst_req_n),
+        .locked    (pll_locked),
+        .clk_125Mhz(clk)
     );
 
-    // Instruction memory (BRAM)
+    // ================================================================
+    // 4) Create a clean reset for the *25 MHz* domain
+    //    - async assert when either:
+    //        a) user reset request is asserted (debounced clean reset in 125 domain deasserted)
+    //        b) PLL is not locked
+    //    - sync deassert to clk_25Mhz
+    // ================================================================
+    logic rst_n_25_async;
+    assign rst_n_25_async = rst_req_n & pll_locked; // active-high "reset_n" pre-sync
+
+    (* ASYNC_REG = "TRUE" *) logic [1:0] rst_sync_25;
+    always_ff @(posedge clk_25Mhz or negedge rst_n_25_async) begin
+        if (!rst_n_25_async)
+            rst_sync_25 <= 2'b00;
+        else
+            rst_sync_25 <= {rst_sync_25[0], 1'b1};
+    end
+
+    logic rst_n_clean;
+    assign rst_n_clean = rst_sync_25[1];
+
+    // ================================================================
+    // Internal interfaces (run on 25 MHz)
+    // ================================================================
+    dmem_if #(.LDTAG_W(4)) dmem_cpu();
+    imem_if imem();
+
+    // Debug wires from CPU
+    logic        dbg_commit_valid, dbg_wb_valid, dbg_redirect_valid, dbg_mispredict;
+    logic [31:0] dbg_commit_pc;
+
+    cpu_core cpu_inst (
+        .clk(clk_25Mhz),
+        .rst_n(rst_n_clean),
+        .dmem(dmem_cpu),
+        .imem(imem),
+
+        .dbg_commit_valid   (dbg_commit_valid),
+        .dbg_wb_valid       (dbg_wb_valid),
+        .dbg_redirect_valid (dbg_redirect_valid),
+        .dbg_mispredict_fire(dbg_mispredict),
+        .dbg_commit_pc      (dbg_commit_pc)
+    );
+
+    // ================================================================
+    // Memories (run on 25 MHz)
+    // ================================================================
     imem #(
         .MEM_WORDS(8192),
         .LATENCY(1),
         .RESP_FIFO_DEPTH(4)
     ) imem_inst (
-        .clk(clk),
-        .rst_n(rst_n),
+        .clk(clk_25Mhz),
+        .rst_n(rst_n_clean),
         .req_valid(imem.imem_req_valid),
         .req_ready(imem.imem_req_ready),
         .req_addr(imem.imem_req_addr),
@@ -43,53 +92,149 @@ module SoC_top #(
         .resp_inst(imem.imem_resp_inst)
     );
 
-    generate
-        if (USE_CACHE) begin : gen_with_cache
-            // Data memory with cache
-            dmem_with_cache #(
-                .CACHE_SIZE_KB(8),
-                .CACHE_LINE_SIZE(64),
-                .CACHE_WAYS(2),
-                .MEM_SIZE_KB(256),
-                .MEM_LATENCY(10),
-                .LDTAG_W(4),
-                .VERBOSE(0)
-            ) dmem_cache_inst (
-                .clk(clk),
-                .rst_n(rst_n),
-                .dmem_cpu(dmem_cpu),
-                .dmem_mem(dmem_backing)
-            );
-            
-            // Backing memory (BRAM or external)
-            dmem_model #(
-                .MEM_SIZE_KB         (64),
-                .LD_LATENCY          (2),
-                .ST_LATENCY          (2),
-                .LDTAG_W            (4)
-            ) dmem_backing_inst (
-                .clk(clk),
-                .rst_n(rst_n),
-                .dmem(dmem_backing)
-            );
-            
-        end else begin : gen_direct
-            // Direct BRAM (no cache)
-            dmem_model #(
-                .MEM_SIZE_KB(64),
-                .LD_LATENCY(2),
-                .ST_LATENCY(2),
-                .LDTAG_W   (4)
-            ) dmem_direct_inst (
-                .clk(clk),
-                .rst_n(rst_n),
-                .dmem(dmem_cpu)
-            );
-        end
-    endgenerate
+    dmem_model #(
+        .MEM_SIZE_KB(64),
+        .LD_LATENCY(2),
+        .ST_LATENCY(2),
+        .LDTAG_W   (4)
+    ) dmem_direct_inst (
+        .clk(clk_25Mhz),
+        .rst_n(rst_n_clean),
+        .dmem(dmem_cpu)
+    );
 
-    // Status indicators
-    assign status_leds = {4'b0, dmem_cpu.ld_valid, dmem_cpu.st_valid, 
-                          dmem_cpu.ld_ready, dmem_cpu.st_ready};
+    // ================================================================
+    // Debug state (human-visible) — all in 25 MHz domain
+    // ================================================================
+    // Heartbeat
+    logic [25:0] hb;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) hb <= '0;
+        else hb <= hb + 1'b1;
+    end
+
+    // Sticky latches
+    logic commit_seen, wb_seen, redirect_seen, mispred_seen;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) begin
+            commit_seen   <= 1'b0;
+            wb_seen       <= 1'b0;
+            redirect_seen <= 1'b0;
+            mispred_seen  <= 1'b0;
+        end else begin
+            if (dbg_commit_valid)   commit_seen   <= 1'b1;
+            if (dbg_wb_valid)       wb_seen       <= 1'b1;
+            if (dbg_redirect_valid) redirect_seen <= 1'b1;
+            if (dbg_mispredict)     mispred_seen  <= 1'b1;
+        end
+    end
+
+    // Counters (use lower bits for easy visibility)
+    logic [31:0] commit_cnt, wb_cnt;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) begin
+            commit_cnt <= '0;
+            wb_cnt     <= '0;
+        end else begin
+            if (dbg_commit_valid) commit_cnt <= commit_cnt + 1'b1;
+            if (dbg_wb_valid)     wb_cnt     <= wb_cnt + 1'b1;
+        end
+    end
+
+    // IMEM traffic counters (independent of commit)
+    logic [31:0] imem_req_cnt, imem_resp_cnt;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) begin
+            imem_req_cnt  <= '0;
+            imem_resp_cnt <= '0;
+        end else begin
+            if (imem.imem_req_valid  && imem.imem_req_ready)  imem_req_cnt  <= imem_req_cnt + 1'b1;
+            if (imem.imem_resp_valid && imem.imem_resp_ready) imem_resp_cnt <= imem_resp_cnt + 1'b1;
+        end
+    end
+
+    // PC snapshotting
+    logic [31:0] pc_last_commit;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) pc_last_commit <= 32'd0;
+        else if (dbg_commit_valid) pc_last_commit <= dbg_commit_pc;
+    end
+
+    // Page 5: slow sample/hold PC low nibble
+    logic [3:0]  pc_hold_nib;
+    logic [23:0] hold;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) begin
+            pc_hold_nib <= 4'h0;
+            hold <= 24'd0;
+        end else begin
+            if ((hold == 0) && dbg_commit_valid) begin
+                pc_hold_nib <= pc_last_commit[5:2];
+                hold <= 24'hFFFFFF;
+            end else if (hold != 0) begin
+                hold <= hold - 1'b1;
+            end
+        end
+    end
+
+    // Page 6: freeze-on-button snapshot (stable readout)
+    logic [2:0] btn_sel_q;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) btn_sel_q <= 3'd0;
+        else btn_sel_q <= btn[3:1];
+    end
+    logic btn_changed;
+    assign btn_changed = (btn_sel_q != btn[3:1]);
+
+    logic [31:0] pc_snap;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) pc_snap <= 32'd0;
+        else if (btn_changed) pc_snap <= pc_last_commit;
+    end
+
+    logic [3:0] pc_sel_nib;
+    always_comb begin
+        unique case (btn[3:1])
+            3'd0: pc_sel_nib = pc_snap[3:0];
+            3'd1: pc_sel_nib = pc_snap[7:4];
+            3'd2: pc_sel_nib = pc_snap[11:8];
+            3'd3: pc_sel_nib = pc_snap[15:12];
+            3'd4: pc_sel_nib = pc_snap[19:16];
+            3'd5: pc_sel_nib = pc_snap[23:20];
+            3'd6: pc_sel_nib = pc_snap[27:24];
+            3'd7: pc_sel_nib = pc_snap[31:28];
+            default: pc_sel_nib = 4'h0;
+        endcase
+    end
+
+    // DONE latch: tolerate off-by-4 (PC vs PC+4)
+    localparam logic [31:0] LAST_PC = 32'h00000694;
+    logic done;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) done <= 1'b0;
+        else if (dbg_commit_valid && (dbg_commit_pc == LAST_PC || dbg_commit_pc == (LAST_PC + 32'd4)))
+            done <= 1'b1;
+    end
+
+    // ================================================================
+    // Debug pages on LEDs (select via sw[3:0])
+    // ================================================================
+    always_comb begin
+        unique case (sw[3:0])
+            4'h0: led = {pll_locked, 2'b00, rst_n_clean}; // [3]=PLL locked, [0]=rst released
+            4'h1: led = hb[25:22];
+            4'h2: led = {commit_seen, wb_seen, redirect_seen, mispred_seen};
+            4'h3: led = commit_cnt[17:14];
+            4'h4: led = wb_cnt[17:14];
+            4'h5: led = pc_hold_nib;
+            4'h6: led = pc_sel_nib;
+            4'h7: led = {dbg_mispredict, dbg_redirect_valid, dbg_wb_valid, dbg_commit_valid};
+            4'h8: led = {done, commit_seen, 2'b00};
+            4'h9: led = imem_req_cnt[17:14];
+            4'hA: led = imem_resp_cnt[17:14];
+            4'hB: led = {imem.imem_req_valid, imem.imem_req_ready, imem.imem_resp_valid, imem.imem_resp_ready};
+            default: led = 4'b0000;
+        endcase
+    end
 
 endmodule

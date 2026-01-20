@@ -82,7 +82,7 @@ module PC (
     // Fetch global epoch
     // ============================================================
     logic [2:0] fetch_global_epoch;
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n)
             fetch_global_epoch <= 3'b0;
         else if (redirect_valid)
@@ -121,7 +121,7 @@ module PC (
         end
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             pc_req_q <= 32'h0000_0000;
             pc_issued_head <= '0;
@@ -189,7 +189,7 @@ module PC (
         end
     end
 
-    // always_ff @(posedge clk or negedge rst_n) begin
+    // always_ff @(posedge clk) begin
     //     if (!rst_n) begin
     //         fetch_pc <= 32'h0000_0000;
     //         fetch_valid <= 1'b0;

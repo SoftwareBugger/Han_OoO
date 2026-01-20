@@ -35,33 +35,101 @@ module dmem_model #(
     genvar i;
     logic        ena [0:7];
     logic [0:0]  wea [0:7];
-    logic [13:0] addra;
+    logic [12:0] addra;
     logic [7:0]  dina [0:7];
     logic        enb [0:7];
-    logic [13:0] addrb;
+    logic [12:0] addrb;
     logic [7:0]  doutb [0:7];
     logic        rstb_busy [0:7];
     logic        rsta_busy [0:7];
 
-    generate
-        for (i = 0; i < 8; i++) begin : INIT_MEM
-            blk_mem_gen_0 dut (
-                .clka      (clk),
-                .wea       (wea[i]),
-                .addra     (addra),
-                .dina      (dina[i]),
+    blk_mem_gen_1 dut0 (
+        .clka      (clk),
+        .wea       (wea[0]),
+        .addra     (addra),
+        .dina      (dina[0]),
 
-                .clkb      (clk),
-                .rstb      (1'b0),
-                .addrb     (addrb),
-                .doutb     (doutb[i]),
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[0])
+    );
 
-                .rsta_busy (rsta_busy[i]),
-                .rstb_busy (rstb_busy[i])
-            );
+    blk_mem_gen_1 dut1 (
+        .clka      (clk),
+        .wea       (wea[1]),
+        .addra     (addra),
+        .dina      (dina[1]),
 
-        end
-    endgenerate
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[1])
+    );
+
+    blk_mem_gen_1 dut2 (
+        .clka      (clk),
+        .wea       (wea[2]),
+        .addra     (addra),
+        .dina      (dina[2]),
+
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[2])
+    );
+
+    blk_mem_gen_1 dut3 (
+        .clka      (clk),
+        .wea       (wea[3]),
+        .addra     (addra),
+        .dina      (dina[3]),
+
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[3])
+    );
+
+    blk_mem_gen_1 dut4 (
+        .clka      (clk),
+        .wea       (wea[4]),
+        .addra     (addra),
+        .dina      (dina[4]),
+
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[4])
+    );
+
+    blk_mem_gen_1 dut5 (
+        .clka      (clk),
+        .wea       (wea[5]),
+        .addra     (addra),
+        .dina      (dina[5]),
+
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[5])
+    );
+
+    blk_mem_gen_1 dut6 (
+        .clka      (clk),
+        .wea       (wea[6]),
+        .addra     (addra),
+        .dina      (dina[6]),
+
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[6])
+    );
+
+    blk_mem_gen_1 dut7 (
+        .clka      (clk),
+        .wea       (wea[7]),
+        .addra     (addra),
+        .dina      (dina[7]),
+
+        .clkb      (clk),
+        .addrb     (addrb),
+        .doutb     (doutb[7])
+    );
 
     // ================================================================
     // Load Request State
@@ -98,7 +166,7 @@ module dmem_model #(
 
     // Byte address -> doubleword index (addr[31:3])
     // assign ld_dword_addr = ld_addr_reg >> 3;
-    assign addrb = dmem.ld_addr[16:3];
+    assign addrb = dmem.ld_addr[14:3];
     
     // Read from 64-bit wide memory
     always_comb begin
@@ -124,7 +192,7 @@ module dmem_model #(
     logic [63:0] st_new_data;
     always_comb begin
         //st_dword_addr = st_addr_reg >> 3;
-        addra = dmem.st_addr[16:3];
+        addra = dmem.st_addr[14:3];
         
         // Split wdata into bytes for BRAM inputs
         dina[0] = dmem.st_wdata[7:0];
@@ -171,7 +239,7 @@ module dmem_model #(
     // ================================================================
     // Sequential Logic
     // ================================================================
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             ld_active <= 1'b0;
             ld_counter <= 0;

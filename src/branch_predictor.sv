@@ -74,7 +74,7 @@ module branch_predictor (
     //   (some designs do that to reduce pollution).
     // -------------------------
     integer i;
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             for (i = 0; i < BTB_ENTRIES; i++) begin
                 btb[i].valid  <= 1'b0;

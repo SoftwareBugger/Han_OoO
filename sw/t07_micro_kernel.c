@@ -91,5 +91,7 @@ int main(void) {
   const uint32_t EXPECT = cs; // replace after first golden
   signature[2] = (cs == EXPECT) ? 0u : 1u;
 
-  while (1) { }
+  *(volatile uint32_t*)0x00001234 = 1;   // done
+  while (1);
+
 }

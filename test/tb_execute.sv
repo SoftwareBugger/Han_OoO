@@ -126,7 +126,7 @@ module execute_tb;
   end
 
   // Simple memory model
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       dmem.ld_resp_valid <= 0;
       dmem.st_ready <= 1;       // Keep store ready after reset

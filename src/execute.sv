@@ -140,7 +140,7 @@ module execute (
     //     end
     // endgenerate
 
-    // always_ff @(posedge clk or negedge rst_n) begin
+    // always_ff @(posedge clk) begin
     //     if (!rst_n) begin
     //         for (int i = 0; i < FU_NUM; i++) begin
     //             pipe_v[i] <= 1'b0;

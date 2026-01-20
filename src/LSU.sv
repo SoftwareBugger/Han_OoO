@@ -297,7 +297,7 @@ module LSU (
     // ============================================================
     // SQ always_ff (UNCHANGED LOGIC; only depends on ld_busy/wb_buf_valid clears)
     // ============================================================
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             for (int i = 0; i < SQ_SIZE; i++) begin
                 valid[i] <= 1'b0;
@@ -310,8 +310,6 @@ module LSU (
             tail_ptr      <= '0;
             last_tail_ptr <= '0;
             count         <= '0;
-
-            wb_buf_valid <= 1'b0;
         end else if (flush_valid) begin
             for (int i = 0; i < SQ_SIZE; i++) begin
                 valid[i] <= 1'b0;
@@ -324,8 +322,6 @@ module LSU (
             tail_ptr      <= '0;
             last_tail_ptr <= '0;
             count         <= '0;
-
-            wb_buf_valid <= 1'b0;
         end else if (recover_valid) begin
             for (int i = 0; i < SQ_SIZE; i++) begin
                 if (valid[i]
@@ -561,7 +557,7 @@ module LSU (
     end
 
     // registered forwarding hits (for load holding register path)
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             fw_hit_comb_arr_ff <= 4'b0000;
             fw_hit_data_ff <= 32'b0;
@@ -580,9 +576,10 @@ module LSU (
     end
 
     // Load request holding register state machine
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             ld_req_valid <= 1'b0;
+            wb_buf_pc <= 32'b0;
         end else if (flush_valid) begin
             ld_req_valid <= 1'b0;
         end else begin
@@ -621,7 +618,7 @@ module LSU (
     // ============================================================
     // Track in-flight load (memory response expected)
     // ============================================================
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             ld_busy <= 1'b0;
         end else if (flush_valid) begin
@@ -687,7 +684,7 @@ module LSU (
     // WB buffer dequeue: downstream accepts
     assign wb_fire = wb_buf_valid && wb_ready;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             wb_buf_valid <= 1'b0;
             wb_buf_data <= '0;
@@ -695,7 +692,6 @@ module LSU (
             wb_buf_prd_new <= '0;
             wb_buf_epoch <= '0;
             wb_buf_uses_rd <= 1'b0;
-            wb_buf_pc <= 32'b0;
         end else if (flush_valid) begin
             wb_buf_valid <= 1'b0;
         end else begin

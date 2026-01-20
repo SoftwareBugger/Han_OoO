@@ -24,7 +24,7 @@ module imem #(
     logic [31:0] bram_dina;
     logic [31:0] bram_douta;
 
-    blk_mem_gen_1 u_imem_bram (
+    blk_mem_gen_0 u_imem_bram (
         .clka  (clk),
         .wea   (bram_wea),
         .addra (bram_addra),
@@ -38,16 +38,19 @@ module imem #(
     logic [31:0] req_addr_q [0:REQ_QUEUE_SIZE-1];
     logic [31:0] resp_inst_q [0:REQ_QUEUE_SIZE-1];
     logic [REQ_QUEUE_SIZE-1:0] done;
-    logic [$clog2(REQ_QUEUE_SIZE)-1:0] req_head, req_tail, req_last_tail, req_count;
+    logic [$clog2(REQ_QUEUE_SIZE)-1:0] req_head, req_tail, req_last_tail, req_sec_last_tail, req_count;
     logic last_req_fire;
-    always_ff @(posedge clk or negedge rst_n) begin
+    logic last_req_fire_ff;
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             req_head      <= '0;
             req_tail      <= '0;
             req_last_tail <= '0;
+            req_sec_last_tail <= '0;
             req_count     <= '0;
             done          <= '0;
             last_req_fire <= 1'b0;
+            last_req_fire_ff <= 1'b0;
             for (int i = 0; i < REQ_QUEUE_SIZE; i++) begin
                 resp_inst_q[i] <= '0;
                 req_addr_q[i] <= '0;
@@ -65,10 +68,12 @@ module imem #(
                 done[req_head] <= 1'b0;
             end
             last_req_fire <= (req_valid && req_ready);
-            if (last_req_fire) begin
-                req_last_tail <= req_tail;
-                resp_inst_q[req_last_tail] <= bram_douta;
-                done[req_last_tail] <= last_req_fire;
+            last_req_fire_ff <= last_req_fire;
+            req_last_tail <= req_tail;
+            req_sec_last_tail <= req_last_tail;
+            if (last_req_fire_ff) begin
+                resp_inst_q[req_sec_last_tail] <= bram_douta;
+                done[req_sec_last_tail] <= last_req_fire_ff;
             end
 
             unique case ({(req_valid && req_ready), (resp_valid && resp_ready)})

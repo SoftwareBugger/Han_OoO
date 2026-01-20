@@ -126,7 +126,7 @@ module ALU (
   logic out_enq_fire;
   assign out_enq_fire = req_valid && req_ready;
 
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       out_vld_q       <= 1'b0;
       out_pc_q        <= 32'b0;

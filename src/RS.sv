@@ -105,7 +105,7 @@ module RS #(
   // Sequential logic
   // ------------------------------------------------------------
   logic [FU_NUM-1:0] old, yng;
-  always_ff @(posedge clk or negedge rst_n) begin
+  always_ff @(posedge clk) begin
     if (!rst_n) begin
       for (int fu = 0; fu < FU_NUM; fu++) begin
         valid[fu][0] <= 1'b0;

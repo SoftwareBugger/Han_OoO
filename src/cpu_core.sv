@@ -9,7 +9,14 @@ module cpu_core (
     dmem_if.master dmem,
 
     // imem interface
-    imem_if.master imem
+    imem_if.master imem,
+
+    // Debug/status outputs (for LEDs / logic analyzer)
+    output logic dbg_commit_valid,
+    output logic dbg_wb_valid,
+    output logic dbg_redirect_valid,
+    output logic dbg_mispredict_fire,
+    output logic [31:0] dbg_commit_pc
 );
 
     /* =========================
@@ -381,5 +388,15 @@ module cpu_core (
     // Commit ready when not stalling for any reason
     // For stores, LSU needs to be ready to accept the commit
     assign commit_ready = 1'b1;  // Simplified - LSU handles store commits internally
+
+
+    // =========================================================================
+    // Debug Outputs for LEDs / Logic Analyzer
+    // =========================================================================
+    assign dbg_commit_valid    = commit_valid;
+    assign dbg_wb_valid        = wb_valid;
+    assign dbg_redirect_valid  = redirect_valid;
+    assign dbg_mispredict_fire = wb_mispredict_fire;
+    assign dbg_commit_pc       = commit_entry.pc;
 
 endmodule

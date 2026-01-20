@@ -108,7 +108,7 @@ module ROB #(
     /* =========================
      * ROB Update Logic
      * ========================= */
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             head_ptr <= '0;
             tail_ptr <= '0;
@@ -236,7 +236,7 @@ module ROB #(
 
     logic [ROB_W_P-1:0] recover_rob_idx;
     logic init_recover_idx;
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             current_state  <= NORMAL;
             recover_rob_idx <= '0;
@@ -285,7 +285,7 @@ module ROB #(
     /* =========================
      * Epoch management
      * ========================= */
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             global_epoch <= '0;
         end else if (flush_valid) begin
