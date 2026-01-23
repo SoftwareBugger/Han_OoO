@@ -101,5 +101,6 @@ int main(void) {
   const uint32_t EXPECT = cs;  // replace later
   signature[5] = (cs == EXPECT) ? 0u : 1u;
 
+  *(volatile uint32_t*)0x00001000 = 0xdeadbeef;
   while (1) { }
 }

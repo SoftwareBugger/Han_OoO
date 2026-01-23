@@ -318,7 +318,6 @@ module dmem_model #(
             end else if (dmem.st_valid && dmem.st_ready) begin
                 // Accept new store request
                 st_addr_reg <= dmem.st_addr;
-                dmem.st_wdata <= dmem.st_wdata;
                 st_wstrb_reg <= dmem.st_wstrb;
                 st_active <= 1'b1;
                 st_counter <= ST_LATENCY - 1;  // -1 because we count this cycle

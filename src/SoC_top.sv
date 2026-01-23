@@ -208,12 +208,60 @@ module SoC_top #(
     end
 
     // DONE latch: tolerate off-by-4 (PC vs PC+4)
-    localparam logic [31:0] LAST_PC = 32'h00000694;
+    localparam logic [31:0] LAST_PC = 32'h000006a4;
     logic done;
     always_ff @(posedge clk_25Mhz) begin
         if (!rst_n_clean) done <= 1'b0;
         else if (dbg_commit_valid && (dbg_commit_pc == LAST_PC || dbg_commit_pc == (LAST_PC + 32'd4)))
             done <= 1'b1;
+    end
+
+    // Pick an aligned MMIO address for DONE (recommended)
+    localparam logic [31:0] DONE_ADDR = 32'h00001000; // 8-byte aligned is safest
+
+    logic [31:0] st_data_full;
+
+    // Helper: extract the 32-bit word being written given 64-bit data + 8-bit strb
+    function automatic logic [31:0] extract_sw_data64(
+        input logic [63:0] data64,
+        input logic [7:0]  strb8
+    );
+        // We expect an SW => exactly 4 contiguous byte lanes set.
+        // Common patterns in a 64-bit beat: 0x0F (low word) or 0xF0 (high word).
+        unique case (strb8)
+            8'b0000_1111: extract_sw_data64 = data64[31:0];
+            8'b1111_0000: extract_sw_data64 = data64[63:32];
+            default:      extract_sw_data64 = 32'hDEAD_BAD0; // debug marker for "unexpected pattern"
+        endcase
+    endfunction
+
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) begin
+            st_data_full <= 32'd0;
+        end else if (dmem_cpu.st_valid && dmem_cpu.st_ready) begin
+            if ({dmem_cpu.st_addr[31:3], 3'b000} == DONE_ADDR) begin
+                // Only latch when this transaction is really an SW-like pattern
+                if (dmem_cpu.st_wstrb == 8'b0000_1111 || dmem_cpu.st_wstrb == 8'b1111_0000) begin
+                    st_data_full <= extract_sw_data64(dmem_cpu.st_wdata, dmem_cpu.st_wstrb);
+                end
+            end
+        end
+    end
+
+
+    logic [3:0] st_data;
+    always_comb begin
+        unique case (btn[3:1])
+            3'd0: st_data = st_data_full[3:0];
+            3'd1: st_data = st_data_full[7:4];
+            3'd2: st_data = st_data_full[11:8];
+            3'd3: st_data = st_data_full[15:12];
+            3'd4: st_data = st_data_full[19:16];
+            3'd5: st_data = st_data_full[23:20];
+            3'd6: st_data = st_data_full[27:24];
+            3'd7: st_data = st_data_full[31:28];
+            default: st_data = 4'h0;
+        endcase
     end
 
     // ================================================================
@@ -233,6 +281,7 @@ module SoC_top #(
             4'h9: led = imem_req_cnt[17:14];
             4'hA: led = imem_resp_cnt[17:14];
             4'hB: led = {imem.imem_req_valid, imem.imem_req_ready, imem.imem_resp_valid, imem.imem_resp_ready};
+            4'hC: led = st_data;
             default: led = 4'b0000;
         endcase
     end

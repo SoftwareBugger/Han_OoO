@@ -83,7 +83,7 @@ module tb_cpu_core;
   dmem_model #(
     .MEM_SIZE_KB         (64),
     .LD_LATENCY_MAX      (2),
-    .ST_LATENCY          (2)
+    .ST_LATENCY          (0)
   ) dmem_inst (
     .clk  (clk),
     .rst_n(rst_n),
