@@ -33,6 +33,20 @@ HanOoO exists to build a mental model you can trust by implementing the real mac
 ## Architecture Overview
 ![alt text](OoO_RV32I.drawio.png)
 
+## SoC Extensions
+- MMIO controller talking to dmem interface, MMIO interface and CPU
+- SPI TX controller capable of receiving MISO
+- UART TX/RX controller capable of sending tx data and get rx data
+
+## Memory Map
+0x00000000 - 0x00002000 Boot ROM
+0x00002000 - 0x00006000 .text, .rodata, .data, .bss ...
+0x00006000 - 0x00007fff stack
+0x80000000 - 0x80000010 SPI TX
+ox80001000 - 0x8000100c UART RX/TX
+
+See app.ld, boot.ld, boot.S, crt0.S for details, these are boot code
+
 ## FPGA implementation
 So far, only BRAM ip is used. If you want to simulate the system, feel free to use vivado or check out previous RTL files of memory models!
 
