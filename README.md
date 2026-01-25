@@ -48,5 +48,5 @@ HanOoO exists to build a mental model you can trust by implementing the real mac
 See app.ld, boot.ld, boot.S, crt0.S for details, these are boot code
 
 ## FPGA implementation
-So far, only BRAM, PLL ip is used. If you want to simulate the system, feel free to use vivado or check out previous RTL files of memory models!
+So far, only BRAM, PLL IPs used. If you want to simulate the system, feel free to use vivado or check out previous RTL files of memory models! 
 
