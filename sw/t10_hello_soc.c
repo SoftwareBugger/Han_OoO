@@ -25,7 +25,7 @@ static void build_hello(char *buf) {
 }
 
 int main(void) {
-    uart_set_baud_div(217);  // 25MHz / 115200 ≈ 217 (adjust as needed)
+    uart_set_baud(217);  // 25MHz / 115200 ≈ 217 (adjust as needed)
 
     static char msg[32];     // .bss (no init image needed)
     build_hello(msg);

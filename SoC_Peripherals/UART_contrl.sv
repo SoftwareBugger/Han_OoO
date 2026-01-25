@@ -42,7 +42,7 @@ module uart_mmio (
   // ---------------------------
   // Bus: always-ready (simple)
   // ---------------------------
-  assign mmio_ready = 1'b1;
+ assign mmio_ready = 1'b1;
  logic bus_fire;
  assign bus_fire = mmio_valid & mmio_ready;
  logic [ADDR_W-1:0] addr;
@@ -170,7 +170,7 @@ module uart_mmio (
   // or when CPU reads DATA (in case you want read-to-clear semantics).
   always_comb begin
     clr_rx_rdy_core = 1'b0;
-    if (rx_rdy_core && rx_en && !rx_hold_valid) clr_rx_rdy_core = 1'b1; // accepted
+    // if (rx_rdy_core && rx_en && !rx_hold_valid) clr_rx_rdy_core = 1'b1; // accepted
     if (data_read_pulse)                         clr_rx_rdy_core = 1'b1; // read clears
   end
 
@@ -233,7 +233,7 @@ module uart_mmio (
     mmio_rdata = 32'h0;
     case (addr[7:0])
       UART_REG_DATA: begin
-        mmio_rdata[7:0] = rx_hold_valid ? rx_hold : 8'h00;
+        mmio_rdata[7:0] = rx_hold;
       end
       UART_REG_STATUS: begin
         mmio_rdata[0] = rx_hold_valid;   // RX_VALID

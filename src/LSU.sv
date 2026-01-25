@@ -267,7 +267,8 @@ module LSU (
     logic mem_wr_fire;
     assign mem_wr_fire = mem_wr_ready && valid[head_ptr] && sq_entries[head_ptr].committed
                         && sq_entries[head_ptr].addr_rdy
-                        && sq_entries[head_ptr].data_rdy;
+                        && sq_entries[head_ptr].data_rdy
+                        && ~sq_entries[head_ptr].sent;
 
     logic st_busy;
 
@@ -368,7 +369,7 @@ module LSU (
                 end
             end
 
-            unique case ({sq_entry_in_fire, mem_wr_fire})
+            unique case ({sq_entry_in_fire, dmem.st_resp_valid && dmem.st_resp_ready})
                 2'b10: count <= (count != SQ_SIZE) ? count + 1 : count; // push only
                 2'b01: count <= (count != 0) ? count - 1 : count; // pop only
                 default: count <= count;

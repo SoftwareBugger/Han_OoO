@@ -1,18 +1,18 @@
 # sw/Makefile
 # Build all C tests in this directory into .elf/.bin/.hex
 #
-# This Makefile now builds TWO images:
-#   1) boot.hex  : a tiny Boot ROM at 0x0000_0000 (boot.S linked with boot.ld)
-#   2) <test>.hex: the application image linked to run from 0x0000_2000 (app.ld + crt0.S)
+# This Makefile builds:
+#   1) boot.hex        : Boot ROM at 0x0000_0000 (boot.S linked with boot.ld)
+#   2) <test>.hex      : Application image (ELF linked to 0x0000_2000, but hex is a flat blob)
+#   3) imem_<test>.hex : COMBINED IMEM image (boot@0 + padding + app@0x2000)  <-- recommended
 #
-# Typical flow:
-#   make                 # builds boot.hex + all app .hex
-#   make t10_hello_soc   # builds boot.hex + build/t10_hello_soc.hex
-#   make golden          # generates golden traces (recommended: update hex2trace to include boot)
+# Typical flow (recommended):
+#   make                     # builds boot + imem_<test>.hex for all tests
+#   make imem_t10_hello_soc   # builds combined image for one test
 #
-# NOTE: Your testbench should load:
-#   - build/boot.hex at address 0x0000_0000
-#   - build/<test>.hex  at address 0x0000_2000 (word offset 0x2000/4 = 2048)
+# Your testbench/BRAM init should load:
+#   - build/imem_<test>.hex at address 0x0000_0000
+# CPU resets at PC=0 -> executes boot -> jr 0x2000 -> app crt0/main
 
 RISCV_PREFIX ?= riscv64-unknown-elf-
 CC      := $(RISCV_PREFIX)gcc
@@ -23,12 +23,11 @@ AR      := $(RISCV_PREFIX)ar
 # Fail early if toolchain isn't in PATH
 TOOL_OK := $(shell command -v $(CC) >/dev/null 2>&1; echo $$?)
 ifeq ($(TOOL_OK),1)
-$(error $(CC) not found in PATH. On Athena, ensure Vitis toolchain is loaded.)
+$(error $(CC) not found in PATH. Ensure your RISC-V toolchain is in PATH.)
 endif
 
 # Build dirs
 BUILD_DIR ?= build
-
 ELF_DIR := $(BUILD_DIR)
 BIN_DIR := $(BUILD_DIR)
 HEX_DIR := $(BUILD_DIR)
@@ -45,8 +44,10 @@ ABI  ?= ilp32
 # Optimization level
 O ?= 1
 
+# Address map (must match app.ld IMEM ORIGIN)
+APP_BASE ?= 0x00002000
+
 # Linker / startup
-# App is linked to run from 0x0000_2000
 APP_LINKER_SCRIPT ?= app.ld
 CRT0              ?= crt0.S
 
@@ -77,6 +78,8 @@ CFLAGS  += $(WARN) $(COMMON) $(INCLUDES)
 CFLAGS  += -O$(O) -g
 CFLAGS  += -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany
 CFLAGS  += -mno-relax
+# Very important for bring-up: disable GP-relative small-data to avoid "gp garbage" loads
+CFLAGS  += -msmall-data-limit=0
 
 # App link flags
 APP_LDFLAGS ?=
@@ -99,10 +102,11 @@ LDLIBS ?=
 .PRECIOUS: $(BUILD_DIR)/%.elf $(BUILD_DIR)/%.bin
 
 # ------------------------------------------------------------------------------
-.PHONY: all list clean toolchain golden golden-clean boot
 
-# Default: build boot + all app hex
-all: boot $(TESTS:%=$(HEX_DIR)/%.hex)
+.PHONY: all list clean toolchain golden golden-clean boot imem imem-all
+
+# Default: build combined images for all tests (recommended)
+all: imem-all
 
 list:
 	@echo "Detected tests:"
@@ -115,7 +119,7 @@ toolchain:
 	@$(CC) --version | head -n 2
 
 # Build a named test: `make t08_sort_search`
-$(TESTS): %: boot $(HEX_DIR)/%.hex
+$(TESTS): %: boot imem_%
 	@true
 
 # Ensure build dir exists
@@ -126,13 +130,6 @@ $(BUILD_DIR):
 # Boot ROM build
 boot: $(HEX_DIR)/boot.hex
 
-# boot.S is required for the boot target. If you don't have it yet, create it.
-# Minimal boot.S (RV32I):
-#   .section .text.boot
-#   .global _boot_start
-# _boot_start:
-#   li t0, 0x00002000
-#   jr t0
 $(BUILD_DIR)/boot.o: $(BOOT_S) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -166,9 +163,6 @@ $(BUILD_DIR)/%.o: %.s | $(BUILD_DIR)
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Compile CRT0 if present
-# (Handled by the generic %.o: %.S rule above)
-
 # Link app
 $(ELF_DIR)/%.elf: $(BUILD_DIR)/%.o $(CRT0_OBJ) $(COMMON_OBJS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(CRT0_OBJ) $(COMMON_OBJS) $< -o $@ $(APP_LDFLAGS) $(LDLIBS) -lgcc
@@ -177,20 +171,49 @@ $(ELF_DIR)/%.elf: $(BUILD_DIR)/%.o $(CRT0_OBJ) $(COMMON_OBJS) | $(BUILD_DIR)
 $(BIN_DIR)/%.bin: $(ELF_DIR)/%.elf | $(BUILD_DIR)
 	$(OBJCOPY) -O binary $< $@
 
-# BIN -> HEX
+# BIN -> HEX (flat blob; only "correct" if your loader loads it at 0x2000)
 $(HEX_DIR)/%.hex: $(BIN_DIR)/%.bin $(HEXIFY) | $(BUILD_DIR)
 	$(PY) $(HEXIFY) $< $@ --strip-trailing-zeros --selfcheck
 
 # ------------------------------------------------------------------------------
+# Combined IMEM image (boot@0x0 + padding + app@APP_BASE)  <-- USE THIS
+#
+# Produces:
+#   build/imem_<test>.bin
+#   build/imem_<test>.hex
+#
+# Load imem_<test>.hex at base 0 in your testbench/BRAM init.
+# ------------------------------------------------------------------------------
+imem: boot
+	@if [ -z "$(TEST)" ]; then \
+	  echo "ERROR: set TEST=<name> (e.g. make imem TEST=t10_hello_soc) or use make imem_<name>"; \
+	  exit 1; \
+	fi
+	@$(MAKE) imem_$(TEST)
+
+imem-all: boot $(TESTS:%=imem_%)
+
+imem_%: boot $(BIN_DIR)/boot.bin $(BIN_DIR)/%.bin $(HEXIFY) | $(BUILD_DIR)
+	@echo "[imem] combining boot + $* at $(APP_BASE)"
+	@$(PY) -c "import pathlib; \
+boot=pathlib.Path('$(BIN_DIR)/boot.bin').read_bytes(); \
+app=pathlib.Path('$(BIN_DIR)/$*.bin').read_bytes(); \
+base=int('$(APP_BASE)',16); \
+assert base>=len(boot), f'APP_BASE {base:#x} overlaps boot size {len(boot):#x}'; \
+pad=b'\\x00'*(base-len(boot)); \
+imem=boot+pad+app; \
+out=pathlib.Path('$(BIN_DIR)/imem_$*.bin'); \
+out.write_bytes(imem); \
+print(f'[imem] boot={len(boot)} pad={len(pad)} app={len(app)} total={len(imem)} -> {out}')"
+	@$(PY) $(HEXIFY) "$(BIN_DIR)/imem_$*.bin" "$(HEX_DIR)/imem_$*.hex" --strip-trailing-zeros --selfcheck
+	@echo "[imem] wrote $(HEX_DIR)/imem_$*.hex"
+
+# ------------------------------------------------------------------------------
 # Golden trace generation
 #
-# Recommended: update hex2trace.py to accept:
-#   --boot build/boot.hex
-# so the trace includes the boot jump from 0x0 -> 0x2000.
-#
-# This Makefile will try to call it that way; if your hex2trace doesn't support
-# --boot yet, either add support or change GOLDEN_CMD below.
-GOLDEN_CMD ?= $(PY) $(HEX2TRACE) --boot "$(HEX_DIR)/boot.hex" "$(HEX_DIR)/*.hex"
+# With combined IMEM images, just trace imem_*.hex (already includes boot jump bytes).
+# ------------------------------------------------------------------------------
+GOLDEN_CMD ?= $(PY) $(HEX2TRACE) "$(HEX_DIR)/imem_*.hex"
 
 golden: all
 	@echo "Generating golden traces..."

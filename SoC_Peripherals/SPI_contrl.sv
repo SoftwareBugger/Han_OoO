@@ -66,6 +66,8 @@ module spi_mmio_gpio_cs (
   logic [31:0] ctrl_reg;
   logic [31:0] clkdiv_reg;
   logic [31:0] gpio_reg;
+  logic [31:0] rx_data_reg; // unused for TX-only
+  assign rx_data_reg[31:16] = 16'h0000; // unused
 
   logic en;
   assign en       = ctrl_reg[8];
@@ -107,7 +109,7 @@ module spi_mmio_gpio_cs (
 
   // Pack byte into tx_data[15:8] if your SPI_TX expects that for width8
   logic [15:0] tx_data;
-  assign tx_data = {mmio_wdata[7:0], 8'h00};
+  assign tx_data = ctrl_reg[1] ? {mmio_wdata[7:0], 8'h00} : mmio_wdata[15:0];
 
   SPI_TX u_spi (
     .clk      (clk),
@@ -118,6 +120,8 @@ module spi_mmio_gpio_cs (
     .done     (spi_ready),
     .tx_data  (tx_data),
     .MOSI     (spi_mosi),
+    .MISO     (spi_miso),
+    .MISO_data(rx_data_reg[15:0]),
     .pos_edge (pos_edge),
     .width8   (width8),
     .clkdiv   (clkdiv_reg[15:0])  // if your SPI_TX has clkdiv port
@@ -155,6 +159,7 @@ module spi_mmio_gpio_cs (
       SPI_REG_CTRL:   mmio_rdata = ctrl_reg;
       SPI_REG_CLKDIV: mmio_rdata = clkdiv_reg;
       SPI_REG_GPIO:   mmio_rdata = gpio_reg;
+      SPI_REG_TXRX:   mmio_rdata = rx_data_reg;
       default:    mmio_rdata = 32'h0;
     endcase
   end

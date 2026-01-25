@@ -105,15 +105,15 @@ module mmio (
     assign mem_dmem.st_resp_ready = cpu_dmem.st_resp_ready;
 
     // SPI MMIO side
-    assign spi_mmio.mmio_valid = (cpu_dmem.ld_valid & ld_hit_spi) | (cpu_dmem.st_valid & st_hit_spi);
-    assign spi_mmio.mmio_we    = cpu_dmem.st_valid & st_hit_spi;
+    assign spi_mmio.mmio_valid = (cpu_dmem.ld_valid & cpu_dmem.ld_ready & ld_hit_spi) | (cpu_dmem.st_valid & cpu_dmem.st_ready & st_hit_spi);
+    assign spi_mmio.mmio_we    = cpu_dmem.st_valid & cpu_dmem.st_ready & st_hit_spi;
     assign spi_mmio.mmio_addr  = cpu_dmem.st_valid ? cpu_dmem.st_addr[ADDR_W-1:0] : cpu_dmem.ld_addr[ADDR_W-1:0];
     assign spi_mmio.mmio_wdata = mmio_unpack_wdata32(cpu_dmem.st_wdata, cpu_dmem.st_addr[2]);
     assign spi_mmio.mmio_wstrb = mmio_unpack_wstrb32(cpu_dmem.st_wstrb, cpu_dmem.st_addr[2]);
 
     // UART MMIO side
-    assign uart_mmio.mmio_valid = (cpu_dmem.ld_valid & ld_hit_uart) | (cpu_dmem.st_valid & st_hit_uart);
-    assign uart_mmio.mmio_we    = cpu_dmem.st_valid & st_hit_uart;
+    assign uart_mmio.mmio_valid = (cpu_dmem.ld_valid & cpu_dmem.ld_ready & ld_hit_uart) | (cpu_dmem.st_valid & cpu_dmem.st_ready & st_hit_uart);
+    assign uart_mmio.mmio_we    = cpu_dmem.st_valid & cpu_dmem.st_ready & st_hit_uart;
     assign uart_mmio.mmio_addr  = cpu_dmem.st_valid ? cpu_dmem.st_addr[ADDR_W-1:0] : cpu_dmem.ld_addr[ADDR_W-1:0];
     assign uart_mmio.mmio_wdata = mmio_unpack_wdata32(cpu_dmem.st_wdata, cpu_dmem.st_addr[2]);
     assign uart_mmio.mmio_wstrb = mmio_unpack_wstrb32(cpu_dmem.st_wstrb, cpu_dmem.st_addr[2]);

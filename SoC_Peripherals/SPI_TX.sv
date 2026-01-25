@@ -12,6 +12,8 @@ module SPI_TX (
   output logic        SS_n,
   output logic        SCLK,
   output logic        MOSI,
+  input  logic        MISO,       // unused for TX-only
+  output logic [15:0]  MISO_data,  // unused for TX-only
   output logic        done         // READY/IDLE level
 );
 
@@ -19,6 +21,7 @@ module SPI_TX (
   state_t state, nstate;
 
   logic [15:0] shft_reg;
+  logic [15:0] miso_reg;
   logic [4:0]  bit_cntr;
 
   logic [15:0] div_cnt;
@@ -79,13 +82,19 @@ module SPI_TX (
   // Bit counter
   // ------------------------
   always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
+    if (!rst_n) begin
       bit_cntr <= 5'd0;
-    else if (rst_cnt)
+      miso_reg <= 16'h0000;
+    end else if (rst_cnt) begin
       bit_cntr <= 5'd0;
-    else if (en_bit)
+      miso_reg <= 16'h0000;
+    end else if (en_bit) begin
       bit_cntr <= bit_cntr + 1'b1;
+      miso_reg <= {miso_reg[14:0], MISO};
+    end
   end
+
+  assign MISO_data = miso_reg;
 
   // ------------------------
   // State register

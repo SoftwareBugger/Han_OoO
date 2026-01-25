@@ -1,35 +1,55 @@
-/* app.ld */
 ENTRY(_start)
 
 MEMORY {
-  RAM (rwx) : ORIGIN = 0x00002000, LENGTH = 64K
+  MEM (rwx) : ORIGIN = 0x00000000, LENGTH = 32K
 }
 
+__stack_size = 0x2000;  /* 8 KiB */
+__stack_top  = ORIGIN(MEM) + LENGTH(MEM);          /* 0x8000 */
+__stack_bot  = __stack_top - __stack_size;         /* 0x6000 */
+
 SECTIONS {
-  . = ORIGIN(RAM);
+  /* App starts at 0x2000 */
+  . = 0x00002000;
 
-  .text : {
-    *(.text.start)
-    *(.text*)
-  } > RAM
+  .text : ALIGN(4) {
+    __text_start = .;
+    KEEP(*(.text.startup .text.startup.*))
+    *(.text .text.*)
+    __text_end = .;
+  } > MEM
 
-  .rodata : {
-    *(.rodata*)
-    *(.srodata*)
-  } > RAM
+  .rodata : ALIGN(4) {
+    __rodata_start = .;
+    *(.rodata .rodata.*)
+    *(.srodata .srodata.*)
+    . = ALIGN(4);
+    __rodata_end = .;
+  } > MEM
 
-  .data : {
-    *(.data*)
-    *(.sdata*)
-  } > RAM
+  .data : ALIGN(4) {
+    __data_start = .;
+    *(.data .data.*)
+    *(.sdata .sdata.*)
+    . = ALIGN(4);
+    __data_end = .;
+  } > MEM
 
-  .bss : {
+  PROVIDE(__global_pointer$ = __data_start + 0x800);
+
+  .bss (NOLOAD) : ALIGN(4) {
     __bss_start = .;
-    *(.bss*)
-    *(.sbss*)
+    *(.bss .bss.*)
+    *(.sbss .sbss.*)
     *(COMMON)
+    . = ALIGN(4);
     __bss_end = .;
-  } > RAM
+  } > MEM
 
-  _stack_top = ORIGIN(RAM) + LENGTH(RAM);
+  /* Optional heap region */
+  __heap_start = __bss_end;
+  __heap_end   = __stack_bot;
+
+  ASSERT(__bss_end <= __stack_bot,
+         "ERROR: DMEM overflow: app sections collide with stack")
 }

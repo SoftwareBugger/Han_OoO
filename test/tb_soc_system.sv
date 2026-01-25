@@ -110,6 +110,8 @@ module tb_soc_system;
   endfunction
 
   initial begin
+    // Delete old file (ignore error if it doesn't exist)
+    // void'($system("rm -f C:\\RTL\\Han_OoO\\test\\periph.jsonl"));
     tf_wb       = $fopen("C:\\RTL\\Han_OoO\\test\\wb.jsonl",       "w");
     tf_commit   = $fopen("C:\\RTL\\Han_OoO\\test\\commit.jsonl",   "w");
     tf_misc     = $fopen("C:\\RTL\\Han_OoO\\test\\misc.jsonl",     "w");
@@ -369,34 +371,93 @@ module tb_soc_system;
   // UART TX sniffer:
   //   - decodes uart_tx_o using baud_div_mon (in clk cycles / bit)
   //   - logs bytes to periph.jsonl
-  int b;
-  byte val;
-  initial begin : uart_sniffer
-    wait (rst_n);
-    forever begin
-      // wait start bit (line goes low)
-      wait (uart_tx_o == 1'b0);
-
-      // move to middle of bit0
-      repeat (baud_div_mon/2) @(posedge clk);
-
-      val = 8'h00;
-      for (b = 0; b < 8; b++) begin
-        repeat (baud_div_mon) @(posedge clk);
-        val[b] = uart_tx_o;
-      end
-
-      // stop bit
-      repeat (baud_div_mon) @(posedge clk);
-
+  // Example: replace soc_dut.uart_inst... with your real instance path
+  always_ff @(posedge soc_dut.u_mem_system.u_uart.rx_rdy_core) begin
+    if (rst_n) begin
       $fwrite(tf_periph,
-        "{\"type\":\"uart_byte\",\"cycle\":%0d,\"baud_div\":%0d,\"byte\":\"0x%02x\"}\n",
-        cycle, baud_div_mon, val
+        "{\"type\":\"uart_rx_byte\",\"cycle\":%0d,\"byte\":\"0x%04x\"}\n",
+        cycle, soc_dut.u_mem_system.u_uart.rx_data_core
       );
-
-      // idle between bytes (avoid double-trigger if line stays low spuriously)
-      repeat (baud_div_mon) @(posedge clk);
     end
   end
+
+  // int b;
+  // byte val;
+  // initial begin : uart_sniffer
+  //   wait (rst_n);
+  //   forever begin
+  //     // wait start bit (line goes low)
+  //     wait (uart_tx_o == 1'b0);
+
+  //     // move to middle of bit0
+  //     repeat (baud_div_mon/2) @(posedge clk);
+
+  //     val = 8'h00;
+  //     for (b = 0; b < 8; b++) begin
+  //       repeat (baud_div_mon) @(posedge clk);
+  //       val[b] = uart_tx_o;
+  //     end
+
+  //     // stop bit
+  //     repeat (baud_div_mon) @(posedge clk);
+
+  //     $fwrite(tf_periph,
+  //       "{\"type\":\"uart_byte\",\"cycle\":%0d,\"baud_div\":%0d,\"byte\":\"0x%02x\"}\n",
+  //       cycle, baud_div_mon, val
+  //     );
+
+  //     // idle between bytes (avoid double-trigger if line stays low spuriously)
+  //     repeat (baud_div_mon) @(posedge clk);
+  //   end
+  // end
+
+  // ------------------------------------------------------------
+// UART load monitor (LSU memory response -> uart_ld.jsonl)
+// Captures when ld_resp_valid & ld_resp_ready (response accepted)
+// Logs response data + the tracked ld_addr_q, filtered to UART MMIO range.
+// Hierarchy per your request: soc_dut.cpu_inst.execute_inst.lsu_u
+// ------------------------------------------------------------
+
+    integer tf_uart_ld;
+
+    initial begin
+    tf_uart_ld = $fopen("C:\\RTL\\Han_OoO\\test\\uart_ld.jsonl", "w");
+    if (tf_uart_ld == 0) begin
+        $display("ERROR: could not open uart_ld.jsonl");
+        $finish;
+    end
+    end
+
+    // Adjust if your UART window differs
+    localparam logic [31:0] UART_BASE = 32'h8000_1000;
+    localparam logic [31:0] UART_MASK = 32'hFFFF_F000; // 4KB window
+
+    logic [31:0] resp_addr;
+    logic [63:0] resp_data;
+
+    always_ff @(posedge clk) begin
+    if (!rst_n) begin
+        // nothing
+    end else begin
+        // Memory response accepted into LSU (load response handshake)
+        if (soc_dut.cpu_inst.execute_inst.lsu_u.wb_buf_enq) begin
+
+
+        // Address associated with this response (tracked by LSU)
+        resp_addr = soc_dut.cpu_inst.execute_inst.lsu_u.ld_addr_q;
+
+        // Raw 64-bit response data from memory/MMIO
+        resp_data = soc_dut.cpu_inst.execute_inst.lsu_u.dmem.ld_resp_data;
+
+        // Filter: only UART MMIO reads (UART_BASE 4KB page)
+        if ( (resp_addr) == UART_BASE ) begin
+            $fwrite(tf_uart_ld,
+            "{\"type\":\"uart_ld\",\"cycle\":%0d,\"addr\":\"0x%08x\",\"data\":\"0x%016x\"}\n",
+            cycle, resp_addr, resp_data
+            );
+        end
+        end
+    end
+    end
 
 endmodule

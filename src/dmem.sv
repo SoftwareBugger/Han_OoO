@@ -54,7 +54,7 @@ module dmem_model #(
         .doutb     (doutb[0])
     );
 
-    blk_mem_gen_1 dut1 (
+    blk_mem_gen_2 dut1 (
         .clka      (clk),
         .wea       (wea[1]),
         .addra     (addra),
@@ -65,7 +65,7 @@ module dmem_model #(
         .doutb     (doutb[1])
     );
 
-    blk_mem_gen_1 dut2 (
+    blk_mem_gen_3 dut2 (
         .clka      (clk),
         .wea       (wea[2]),
         .addra     (addra),
@@ -76,7 +76,7 @@ module dmem_model #(
         .doutb     (doutb[2])
     );
 
-    blk_mem_gen_1 dut3 (
+    blk_mem_gen_4 dut3 (
         .clka      (clk),
         .wea       (wea[3]),
         .addra     (addra),
@@ -87,7 +87,7 @@ module dmem_model #(
         .doutb     (doutb[3])
     );
 
-    blk_mem_gen_1 dut4 (
+    blk_mem_gen_5 dut4 (
         .clka      (clk),
         .wea       (wea[4]),
         .addra     (addra),
@@ -98,7 +98,7 @@ module dmem_model #(
         .doutb     (doutb[4])
     );
 
-    blk_mem_gen_1 dut5 (
+    blk_mem_gen_6 dut5 (
         .clka      (clk),
         .wea       (wea[5]),
         .addra     (addra),
@@ -109,7 +109,7 @@ module dmem_model #(
         .doutb     (doutb[5])
     );
 
-    blk_mem_gen_1 dut6 (
+    blk_mem_gen_7 dut6 (
         .clka      (clk),
         .wea       (wea[6]),
         .addra     (addra),
@@ -120,7 +120,7 @@ module dmem_model #(
         .doutb     (doutb[6])
     );
 
-    blk_mem_gen_1 dut7 (
+    blk_mem_gen_8 dut7 (
         .clka      (clk),
         .wea       (wea[7]),
         .addra     (addra),
