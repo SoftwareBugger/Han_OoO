@@ -333,6 +333,16 @@ module LSU (
                     tail_ptr <= i;
                 end
             end
+            // The memory side doesn't know we are recovering so we should still take the reponse
+            if (dmem.st_resp_valid && dmem.st_resp_ready) begin
+                // Store writeback from dmem
+                valid[head_ptr] <= 1'b0;
+                head_ptr <= head_ptr + 1;
+                st_busy <= 1'b0;
+                dmem.st_resp_ready <= 1'b0;
+                sq_entries[head_ptr].sent <= 1'b1;
+                count <= count - 1;
+            end
             last_tail_ptr <= tail_ptr;
         end else begin
             last_tail_ptr <= tail_ptr;
@@ -351,10 +361,10 @@ module LSU (
             if (dmem.st_resp_valid && dmem.st_resp_ready) begin
                 // Store writeback from dmem
                 valid[head_ptr] <= 1'b0;
-                sq_entries[head_ptr].sent <= 1'b1;
                 head_ptr <= head_ptr + 1;
                 st_busy <= 1'b0;
                 dmem.st_resp_ready <= 1'b0;
+                sq_entries[head_ptr].sent <= 1'b1;
             end
 
 
@@ -401,7 +411,9 @@ module LSU (
         valid[head_ptr] &&
         sq_entries[head_ptr].committed &&
         sq_entries[head_ptr].addr_rdy &&
-        sq_entries[head_ptr].data_rdy;
+        sq_entries[head_ptr].data_rdy &&
+        ~sq_entries[head_ptr].sent &&
+        ~recover_valid;
 
     assign dmem.st_valid = head_can_send;
     assign dmem.st_addr  = sq_entries[head_ptr].addr;

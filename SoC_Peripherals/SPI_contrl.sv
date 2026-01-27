@@ -159,7 +159,7 @@ module spi_mmio_gpio_cs (
       SPI_REG_CTRL:   mmio_rdata = ctrl_reg;
       SPI_REG_CLKDIV: mmio_rdata = clkdiv_reg;
       SPI_REG_GPIO:   mmio_rdata = gpio_reg;
-      SPI_REG_TXRX:   mmio_rdata = rx_data_reg;
+      SPI_REG_TXRX:   mmio_rdata = mmio_we ? '0 : rx_data_reg;
       default:    mmio_rdata = 32'h0;
     endcase
   end

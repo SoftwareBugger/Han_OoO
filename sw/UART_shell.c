@@ -12,7 +12,7 @@ int main(void) {
         char c = uart_getc_blocking();
 
         // echo
-        uart_putc(c);
+        // uart_putc(c);
 
         if (c == '\r' || c == '\n') {
             line[idx] = 0;

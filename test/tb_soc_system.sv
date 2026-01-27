@@ -27,6 +27,14 @@ module tb_soc_system;
   initial clk = 1'b0;
   always #5 clk = ~clk; // 100 MHz
 
+  event console_ready_ev;
+  event response_ready_ev;
+
+  // Set this to the exact phrase your SoC prints when UART console is ready.
+  // Examples: "READY\n", "> ", "UART ready\r\n"
+  string CONSOLE_READY_STR = "UART console ready.> ";
+
+
   task automatic do_reset();
     rst_n = 1'b0;
     repeat (20) @(posedge clk);
@@ -34,6 +42,72 @@ module tb_soc_system;
     rst_n = 1'b1;
     repeat (5) @(posedge clk);
   endtask
+
+    // ------------------------------------------------------------
+    // UART host model (PC side) at the *pins*
+    //   - Drives uart_rx_i (host->SoC RX)
+    //   - Decodes uart_tx_o (SoC TX->host)
+    // Timing is in clk cycles, using baud_div_mon (cycles/bit).
+    // ------------------------------------------------------------
+
+    event uart_cfg_ev;  // fired when firmware programs BAUD_DIV
+
+    function automatic int bit_clks();
+      // guard against 0 or crazy values
+      if (baud_div_mon <= 0) bit_clks = 1;
+      else                  bit_clks = baud_div_mon;
+    endfunction
+
+    task automatic uart_host_send_byte(input byte b);
+      int i;
+      // start bit
+      uart_rx_i <= 1'b0;
+      repeat (bit_clks()) @(posedge clk);
+
+      // data bits, LSB first
+      for (i = 0; i < 8; i++) begin
+        uart_rx_i <= b[i];
+        repeat (bit_clks()) @(posedge clk);
+      end
+
+      // stop bit
+      uart_rx_i <= 1'b1;
+      repeat (bit_clks()) @(posedge clk);
+
+      // a little idle spacing (optional)
+      repeat (bit_clks()) @(posedge clk);
+    endtask
+
+    task automatic uart_host_send_string(input string s);
+      int k;
+      for (k = 0; k < s.len(); k++) begin
+        uart_host_send_byte(byte'(s[k]));
+      end
+    endtask
+
+    task automatic uart_host_recv_byte(output byte b);
+      int i;
+
+      // wait for start bit
+      wait (uart_tx_o == 1'b0);
+
+      // sample in the middle of bit0
+      repeat (bit_clks()/2) @(posedge clk);
+
+      // now sample each data bit at bit boundaries
+      b = 8'h00;
+      for (i = 0; i < 8; i++) begin
+        repeat (bit_clks()) @(posedge clk);
+        b[i] = uart_tx_o;
+      end
+
+      // stop bit (ignore value, but wait it)
+      repeat (bit_clks()) @(posedge clk);
+
+      // consume a little idle time to avoid retrigger issues
+      repeat (bit_clks()/2) @(posedge clk);
+    endtask
+
 
   // -------------------------
   // SoC pins
@@ -64,14 +138,14 @@ module tb_soc_system;
   initial spi_miso = 1'b0;
 
   // UART loopback (optional). If you want pure "TX sniff only", comment this out.
-  initial begin
-    uart_rx_i = 1'b1;
-    wait (rst_n);
-    forever begin
-      @(posedge clk);
-      uart_rx_i <= uart_tx_o;
-    end
-  end
+  // initial begin
+  //   uart_rx_i = 1'b1;
+  //   wait (rst_n);
+  //   forever begin
+  //     @(posedge clk);
+  //     uart_rx_i <= uart_tx_o;
+  //   end
+  // end
 
   // -------------------------
   // Trace output (same files as proc_tb + one peripheral file)
@@ -81,6 +155,7 @@ module tb_soc_system;
   integer tf_misc;
   integer tf_dispatch;
   integer tf_periph;
+  integer tf_spi;
 
   longint cycle;
   int unsigned commits;
@@ -117,12 +192,14 @@ module tb_soc_system;
     tf_misc     = $fopen("C:\\RTL\\Han_OoO\\test\\misc.jsonl",     "w");
     tf_dispatch = $fopen("C:\\RTL\\Han_OoO\\test\\dispatch.jsonl", "w");
     tf_periph = $fopen("C:\\RTL\\Han_OoO\\test\\periph.jsonl", "a");
+    tf_spi     = $fopen("C:\\RTL\\Han_OoO\\test\\spi.jsonl",     "w");
 
     if (tf_wb       == 0) $fatal(1, "Cannot open wb.jsonl");
     if (tf_commit   == 0) $fatal(1, "Cannot open commit.jsonl");
     if (tf_misc     == 0) $fatal(1, "Cannot open misc.jsonl");
     if (tf_dispatch == 0) $fatal(1, "Cannot open dispatch.jsonl");
     if (tf_periph   == 0) $fatal(1, "Cannot open periph.jsonl");
+    if (tf_spi      == 0) $fatal(1, "Cannot open spi.jsonl");
   end
 
   // -------------------------
@@ -144,6 +221,7 @@ module tb_soc_system;
     $fclose(tf_misc);
     $fclose(tf_dispatch);
     $fclose(tf_periph);
+    $fclose(tf_spi);
     $finish;
   end
 
@@ -289,11 +367,13 @@ module tb_soc_system;
 
         if (mmio_st_addr == (UART_BASE + UART_REG_BAUD_DIV)) begin
           baud_div_mon <= mmio_st_wdata32;
+          -> uart_cfg_ev;
           $fwrite(tf_periph,
             "{\"type\":\"uart_cfg\",\"cycle\":%0d,\"baud_div\":%0d}\n",
             cycle, mmio_st_wdata32
           );
         end
+
       end
     end
   end
@@ -333,13 +413,13 @@ module tb_soc_system;
         spi_res_n_q <= spi_res_n;
       end
 
-      if (uart_tx_o !== uart_tx_q) begin
-        $fwrite(tf_periph,
-          "{\"type\":\"uart_tx_edge\",\"cycle\":%0d,\"tx\":%0d}\n",
-          cycle, uart_tx_o
-        );
-        uart_tx_q <= uart_tx_o;
-      end
+      // if (uart_tx_o !== uart_tx_q) begin
+      //   $fwrite(tf_periph,
+      //     "{\"type\":\"uart_tx_edge\",\"cycle\":%0d,\"tx\":%0d}\n",
+      //     cycle, uart_tx_o
+      //   );
+      //   uart_tx_q <= uart_tx_o;
+      // end
     end
   end
 
@@ -349,6 +429,7 @@ module tb_soc_system;
   //   - logs each byte with current DC value (command/data)
   byte cur_byte;
   int  kb;
+  localparam [32:0] spi_msg = 32'hDEADBEEF; // example SPI message to send
   initial begin : spi_sniffer
     wait (rst_n);
     forever begin
@@ -368,18 +449,48 @@ module tb_soc_system;
     end
   end
 
+  // THIS MAKES SPI BUGGY??
+  int kb2;
+  int spi_index; 
+  int byte_count;
+  initial begin : spi_sender
+    wait (rst_n);
+    forever begin
+      // wait for CS assertion
+      wait (spi_cs_n == 1'b0);
+      byte_count = 0;
+      while (spi_cs_n == 1'b0) begin
+        // cur_byte = 8'h00;
+        for (kb2 = 0; kb2 < 8; kb2++) begin
+          spi_miso <= spi_msg[31 - (kb2 + 8*byte_count)]; // example MISO response
+          @(negedge spi_sclk);
+          // @(posedge spi_sclk);
+          // cur_byte = {cur_byte[6:0], spi_mosi};
+        end
+        // $fwrite(tf_periph,
+        //   "{\"type\":\"spi_byte\",\"cycle\":%0d,\"dc\":%0d,\"byte\":\"0x%02x\"}\n",
+        //   cycle, spi_dc, cur_byte
+        // );
+        byte_count = byte_count + 1;
+        if (byte_count >=4) begin
+          byte_count = 0;
+        end
+      end
+    end
+  end
+
   // UART TX sniffer:
   //   - decodes uart_tx_o using baud_div_mon (in clk cycles / bit)
   //   - logs bytes to periph.jsonl
   // Example: replace soc_dut.uart_inst... with your real instance path
-  always_ff @(posedge soc_dut.u_mem_system.u_uart.rx_rdy_core) begin
-    if (rst_n) begin
-      $fwrite(tf_periph,
-        "{\"type\":\"uart_rx_byte\",\"cycle\":%0d,\"byte\":\"0x%04x\"}\n",
-        cycle, soc_dut.u_mem_system.u_uart.rx_data_core
-      );
-    end
-  end
+  // always_ff @(posedge soc_dut.u_mem_system.u_uart.rx_rdy_core) begin
+  //   if (rst_n) begin
+  //     $fwrite(tf_periph,
+  //       "{\"type\":\"uart_rx_byte\",\"cycle\":%0d,\"byte\":\"0x%04x\"}\n",
+  //       cycle, soc_dut.u_mem_system.u_uart.rx_data_core
+  //     );
+  //   end
+  // end
 
   // int b;
   // byte val;
@@ -460,4 +571,414 @@ module tb_soc_system;
     end
     end
 
+  // ------------------------------------------------------------
+  // Host behavior:
+  //   - Wait until firmware programs baud_div
+  //   - Send some bytes into SoC RX
+  //   - Decode SoC TX and log as uart_tx_byte
+  // ------------------------------------------------------------
+  byte rx_b;
+  string tb_hello_str = "hello from tb\n";
+  string tb_ping_str  = "ping\n";
+  string prog_prefix = ".You typed: ";
+  string prog_suffix = ".> ";
+  initial begin : uart_host_threads
+    
+
+    wait (rst_n);
+    // wait until firmware sets baud, so timing matches
+    @uart_cfg_ev;
+
+    // Give firmware a moment to finish init
+    repeat (2000) @(posedge clk);
+
+    // Wait until SoC prints the ready marker/prompt
+    @console_ready_ev;
+
+    // Example: send a line (your firmware should read & respond/echo)
+    uart_host_send_string(tb_hello_str);
+
+    
+    @response_ready_ev;
+
+    // Then optionally keep feeding bytes periodically
+    forever begin
+      uart_host_send_string(tb_ping_str);
+      
+      @response_ready_ev;
+    end
+
+    repeat (50000) @(posedge clk);
+  end
+
+  // Decode SoC TX forever and log to periph.jsonl
+  byte b;
+
+  // small rolling buffer to detect the "ready" banner/prompt
+  string rx_hist = "";
+  int    max_hist = 256;
+  bit    ready_seen = 0;
+  int L;
+  initial begin : uart_tx_decoder
+
+    wait (rst_n);
+    @uart_cfg_ev;
+
+    for (int i = 0; i < CONSOLE_READY_STR.len(); i++) begin
+      uart_host_recv_byte(b);
+
+      // log every TX byte
+      $fwrite(tf_periph,
+        "{\"type\":\"uart_tx_byte\",\"cycle\":%0d,\"byte\":\"0x%02x\",\"char\":\"%s\"}\n",
+        cycle, b, (b >= 32 && b < 127) ? {byte'(b)} : "."
+      );
+    end
+    -> console_ready_ev;
+
+    for (int i = 0; i < prog_prefix.len() + tb_hello_str.len() + prog_suffix.len() - 1; i++) begin
+      uart_host_recv_byte(b);
+      // log every TX byte
+      $fwrite(tf_periph,
+        "{\"type\":\"uart_tx_byte\",\"cycle\":%0d,\"byte\":\"0x%02x\",\"char\":\"%s\"}\n",
+        cycle, b, (b >= 32 && b < 127) ? {byte'(b)} : "."
+      );
+    end
+    -> response_ready_ev;
+
+    forever begin
+      for (int i = 0; i < prog_prefix.len() + tb_ping_str.len() + prog_suffix.len() - 1; i++) begin
+        uart_host_recv_byte(b);
+        // log every TX byte
+        $fwrite(tf_periph,
+          "{\"type\":\"uart_tx_byte\",\"cycle\":%0d,\"byte\":\"0x%02x\",\"char\":\"%s\"}\n",
+          cycle, b, (b >= 32 && b < 127) ? {byte'(b)} : "."
+        );
+      end
+      -> response_ready_ev;
+    end
+
+    // // build history (keep raw bytes; for non-printables keep them as-is or map to '.')
+    // // easiest: append exact byte value as a 1-char string when printable, else append the byte anyway
+    // // If you want to match "\n" etc, make sure your CONSOLE_READY_STR matches what firmware prints.
+    // rx_hist = {rx_hist, {byte'(b)}};
+
+    // // cap history
+    // if (rx_hist.len() > max_hist)
+    //   rx_hist = rx_hist.substr(rx_hist.len()-max_hist, max_hist);
+
+    // // detect the ready string once
+    // if (!ready_seen) begin
+    //   L = CONSOLE_READY_STR.len();
+    //   if (L > 0 && rx_hist.len() >= L) begin
+    //     if (rx_hist.substr(rx_hist.len()-L, L) == CONSOLE_READY_STR) begin
+    //       ready_seen = 1;
+    //       $fwrite(tf_periph,
+    //         "{\"type\":\"uart_console_ready\",\"cycle\":%0d,\"str\":\"%s\"}\n",
+    //         cycle, CONSOLE_READY_STR
+    //       );
+          
+    //     end
+    //   end
+    // end
+  end
+
+  // ============================================================
+  // ============================================================
+  // SPI monitor + MISO responder
+  // - Captures SPI_CTRL[0] (pos_edge) from MMIO writes
+  // - Samples MOSI/MISO on opposite edge (stable sampling)
+  // - Logs to a separate file: spi.jsonl (opened above)
+  // - Optionally drives MISO with a simple response stream
+  // ============================================================
+
+  // -----------------------------
+  // EDIT THIS: your MMIO address for SPI_CTRL
+  // If your TB mmio_addr is an OFFSET (not absolute), set it to SPI_CTRL offset.
+  // If your TB mmio_addr is absolute, set it to (SPI_BASE + SPI_CTRL).
+  // -----------------------------
+  localparam logic [31:0] SPI_CTRL_ADDR = 32'h0000_0008;
+
+  // Enable/disable TB driving MISO (keep 0 if you only want sniffing)
+  bit tb_spi_drive_miso = 1'b1;
+
+  // -----------------------------
+  // Shadow of SPI CTRL (captured from MMIO write)
+  // -----------------------------
+  logic [31:0] tb_spi_ctrl_shadow;
+  logic        tb_spi_ctrl_seen;
+
+  // Capture SPI_CTRL writes from the SPI MMIO block
+  // NOTE: adjust this hierarchy if your mem_system path differs.
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      tb_spi_ctrl_shadow <= '0;
+      tb_spi_ctrl_seen   <= 1'b0;
+    end else begin
+      if (soc_dut.u_mem_system.spi_mmio.mmio_valid &&
+          soc_dut.u_mem_system.spi_mmio.mmio_ready &&
+          soc_dut.u_mem_system.spi_mmio.mmio_we    &&
+          (soc_dut.u_mem_system.spi_mmio.mmio_addr == SPI_CTRL_ADDR)) begin
+        tb_spi_ctrl_shadow <= soc_dut.u_mem_system.spi_mmio.mmio_wdata;
+        tb_spi_ctrl_seen   <= 1'b1;
+        $display("[%0t] TB captured SPI_CTRL write: 0x%08x (pos_edge=%0d)",
+                 $time, soc_dut.u_mem_system.spi_mmio.mmio_wdata,
+                 soc_dut.u_mem_system.spi_mmio.mmio_wdata[0]);
+      end
+    end
+  end
+
+  // -----------------------------
+  // SPI monitor state
+  // -----------------------------
+  typedef enum int { EDGE_POSEDGE = 0, EDGE_NEGEDGE = 1 } spi_edge_e;
+
+  event ev_spi_mosi_byte;
+  event ev_spi_miso_byte;
+  event ev_spi_any_byte;
+  event ev_spi_slave_tx_byte;
+
+  byte spi_last_mosi;
+  byte spi_last_miso;
+  byte spi_last_slave_tx;
+
+  byte spi_mosi_q[$];
+  byte spi_miso_q[$];
+
+  // Response stream for MISO (TB as slave).
+  // You can push bytes into this queue from other TB code if you want.
+  byte spi_resp_q[$];
+
+  // Extract pos_edge bit from CTRL[0]
+  function automatic bit spi_pos_edge_from_ctrl(input logic [31:0] spi_ctrl);
+    return spi_ctrl[0];
+  endfunction
+
+  // If pos_edge=1, your controller updates on posedge and is stable on negedge -> sample on negedge.
+  // If pos_edge=0, your controller updates on negedge and is stable on posedge -> sample on posedge.
+  bit pos_edge;
+  function automatic spi_edge_e spi_sample_edge_from_ctrl(input logic [31:0] spi_ctrl);
+    pos_edge = spi_pos_edge_from_ctrl(spi_ctrl);
+    return pos_edge ? EDGE_NEGEDGE : EDGE_POSEDGE;
+  endfunction
+
+  // Helper: wait for a selected SCLK edge
+  task automatic spi_wait_edge(input spi_edge_e edge_sel, input logic sclk);
+    if (edge_sel == EDGE_POSEDGE) @(posedge sclk);
+    else                          @(negedge sclk);
+  endtask
+
+  // Capture one byte (MSB-first) assuming CS is already low.
+  task automatic spi_capture_byte_while_cs_low(
+    input  spi_edge_e edge_sel,
+    input  logic cs_n,
+    input  logic sclk,
+    input  logic sdata,
+    output byte  out_b,
+    output bit   ok
+  );
+    out_b = 8'h00;
+    ok    = 1'b0;
+
+    if (cs_n) return;
+
+    for (int i = 7; i >= 0; i--) begin
+      spi_wait_edge(edge_sel, sclk);
+      if (cs_n) return;
+      out_b[i] = sdata;
+    end
+
+    ok = 1'b1;
+  endtask
+
+  // Monitor MOSI stream while CS is low (logs ALL bytes in a burst)
+  byte b_0;
+  bit  ok_0;
+  task automatic spi_monitor_mosi(
+    input spi_edge_e edge_sel,
+    input logic cs_n,
+    input logic sclk,
+    input logic mosi
+  );
+    forever begin
+      @(negedge cs_n);
+      while (!cs_n) begin
+        spi_capture_byte_while_cs_low(edge_sel, cs_n, sclk, mosi, b_0, ok_0);
+        if (!ok_0) break;
+
+        spi_last_mosi = b_0;
+        spi_mosi_q.push_back(b_0);
+        -> ev_spi_mosi_byte;
+        -> ev_spi_any_byte;
+
+        // JSON log (separate file)
+        $fwrite(tf_spi,
+          "{\"type\":\"spi_mosi_byte\",\"cycle\":%0d,\"byte\":\"0x%02x\",\"dc\":%0d}\n",
+          cycle, b_0, spi_dc
+        );
+
+        $display("[%0t] SPI MOSI byte: 0x%02x (dc=%0d)", $time, b_0, spi_dc);
+      end
+    end
+  endtask
+
+  byte b_1;
+  bit  ok_1;
+  // Monitor MISO stream while CS is low (logs ALL bytes in a burst)
+  task automatic spi_monitor_miso(
+    input spi_edge_e edge_sel,
+    input logic cs_n,
+    input logic sclk,
+    input logic miso
+  );
+    forever begin
+      @(negedge cs_n);
+      while (!cs_n) begin
+        spi_capture_byte_while_cs_low(edge_sel, cs_n, sclk, miso, b_1, ok_1);
+        if (!ok_1) break;
+
+        spi_last_miso = b_1;
+        spi_miso_q.push_back(b_1);
+        -> ev_spi_miso_byte;
+        -> ev_spi_any_byte;
+
+        $fwrite(tf_spi,
+          "{\"type\":\"spi_miso_byte\",\"cycle\":%0d,\"byte\":\"0x%02x\"}",
+          cycle, b_1
+        );
+
+        $display("[%0t] SPI MISO byte: 0x%02x", $time, b_1);
+      end
+    end
+  endtask
+
+  // Wait helpers (UART-style)
+  task automatic wait_spi_mosi_byte(input byte expected);
+    forever begin
+      @ev_spi_mosi_byte;
+      if (spi_last_mosi == expected) return;
+    end
+  endtask
+
+  task automatic wait_spi_miso_byte(input byte expected);
+    forever begin
+      @ev_spi_miso_byte;
+      if (spi_last_miso == expected) return;
+    end
+  endtask
+
+  // Default response pattern for MISO
+  task automatic spi_fill_default_resp_q();
+    spi_resp_q.delete();
+    // repeating pattern: AA 55 A5 5A ...
+    spi_resp_q.push_back(8'hAA);
+    spi_resp_q.push_back(8'h55);
+    spi_resp_q.push_back(8'hA5);
+    spi_resp_q.push_back(8'h5A);
+    spi_resp_q.push_back(8'hDE);
+    spi_resp_q.push_back(8'hAD);
+    spi_resp_q.push_back(8'hBE);
+    spi_resp_q.push_back(8'hEF);
+  endtask
+
+  // Simple SPI slave that shifts out bytes on MISO while CS is low.
+  // - Drives on the OPPOSITE edge of the controller's sampling edge (so master samples stable data).
+  // - Consumes bytes from spi_resp_q; if empty, refills with a default pattern.
+  spi_edge_e drive_edge;
+  byte      cur;
+  task automatic spi_slave_drive_miso_stream(
+    input spi_edge_e samp_edge,
+    input logic cs_n,
+    input logic sclk
+  );
+
+    drive_edge = (samp_edge == EDGE_POSEDGE) ? EDGE_NEGEDGE : EDGE_POSEDGE;
+
+    forever begin
+      wait(cs_n == 1'b0);
+
+      // if (!tb_spi_drive_miso) begin
+      //   // Just hold low while CS asserted
+      //   while (!cs_n) begin
+      //     spi_miso <= 1'b0;
+      //     @(posedge sclk or negedge sclk or posedge cs_n);
+      //   end
+      //   spi_miso <= 1'b0;
+      //   continue;
+      // end
+
+      if (spi_resp_q.size() == 0) spi_fill_default_resp_q();
+
+      // -------- First byte of the burst --------
+      cur = (spi_resp_q.size() != 0) ? spi_resp_q.pop_front() : 8'h00;
+      spi_miso <= cur[7];
+
+      spi_last_slave_tx = cur;
+      -> ev_spi_slave_tx_byte;
+      $fwrite(tf_spi,
+        "{\"type\":\"spi_slave_tx_byte\",\"cycle\":%0d,\"byte\":\"0x%02x\"}\n",
+        cycle, cur
+      );
+
+      // Shift bits [7:0]
+      for (int i = 7; i > 0; i--) begin
+        spi_wait_edge(samp_edge, sclk);  if (cs_n) break;
+        spi_wait_edge(drive_edge, sclk); if (cs_n) break;
+        spi_miso <= cur[i-1];
+      end
+      spi_wait_edge(samp_edge, sclk); if (cs_n) begin
+        spi_miso <= 1'b0;
+        continue;
+      end
+
+      // -------- Remaining bytes while CS stays low --------
+      while (!cs_n) begin
+        // Prepare next byte on the drive edge
+        spi_wait_edge(drive_edge, sclk); if (cs_n) break;
+
+        if (spi_resp_q.size() == 0) spi_fill_default_resp_q();
+        cur = (spi_resp_q.size() != 0) ? spi_resp_q.pop_front() : 8'h00;
+
+        spi_miso <= cur[7];
+
+        spi_last_slave_tx = cur;
+        -> ev_spi_slave_tx_byte;
+        $fwrite(tf_spi,
+          "{\"type\":\"spi_slave_tx_byte\",\"cycle\":%0d,\"byte\":\"0x%02x\"}\n",
+          cycle, cur
+        );
+
+        for (int i = 7; i > 0; i--) begin
+          spi_wait_edge(samp_edge, sclk);  if (cs_n) break;
+          spi_wait_edge(drive_edge, sclk); if (cs_n) break;
+          spi_miso <= cur[i-1];
+        end
+        spi_wait_edge(samp_edge, sclk); if (cs_n) break;
+      end
+
+      spi_miso <= 1'b0;
+    end
+  endtask
+
+  // -----------------------------
+  // Start monitors automatically once SPI_CTRL has been programmed
+  // -----------------------------
+  initial begin : start_spi_monitors_and_slave
+    spi_edge_e samp;
+
+    // Wait until software sets SPI_CTRL at least once
+    wait (tb_spi_ctrl_seen);
+
+    samp = spi_sample_edge_from_ctrl(tb_spi_ctrl_shadow);
+
+    $display("[%0t] SPI armed: SPI_CTRL=0x%08x pos_edge=%0d -> sampling on %s",
+             $time, tb_spi_ctrl_shadow, tb_spi_ctrl_shadow[0],
+             (samp == EDGE_POSEDGE) ? "posedge" : "negedge");
+
+    // Start monitors + optional MISO slave
+    fork
+      spi_monitor_mosi(samp, spi_cs_n, spi_sclk, spi_mosi);
+      spi_monitor_miso(samp, spi_cs_n, spi_sclk, spi_miso);
+      spi_slave_drive_miso_stream(samp, spi_cs_n, spi_sclk);
+    join_none
+  end
 endmodule

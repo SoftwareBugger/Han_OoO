@@ -87,7 +87,6 @@ module SPI_TX (
       miso_reg <= 16'h0000;
     end else if (rst_cnt) begin
       bit_cntr <= 5'd0;
-      miso_reg <= 16'h0000;
     end else if (en_bit) begin
       bit_cntr <= bit_cntr + 1'b1;
       miso_reg <= {miso_reg[14:0], MISO};

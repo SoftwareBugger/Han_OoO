@@ -206,9 +206,9 @@ module mmio (
             if (st_is_mem || st_hit_mem) begin
                 cpu_dmem.st_resp_valid = mem_dmem.st_resp_valid;
             end else if (st_is_spi) begin
-                cpu_dmem.st_resp_valid = 1'b1; // valid at next cycle of request
+                cpu_dmem.st_resp_valid = cpu_dmem.st_resp_ready; // valid at next cycle of request
             end else if (st_is_uart) begin
-                cpu_dmem.st_resp_valid = 1'b1; // valid at next cycle of request
+                cpu_dmem.st_resp_valid = cpu_dmem.st_resp_ready; // valid at next cycle of request
             end
         end
 

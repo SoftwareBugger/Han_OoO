@@ -204,16 +204,6 @@ module dmem_model #(
         dina[6] = dmem.st_wdata[55:48];
         dina[7] = dmem.st_wdata[63:56];
         
-        // Set write enables based on wstrb
-        wea[0] = dmem.st_wstrb[0] & ena[0];
-        wea[1] = dmem.st_wstrb[1] & ena[1];
-        wea[2] = dmem.st_wstrb[2] & ena[2];
-        wea[3] = dmem.st_wstrb[3] & ena[3];
-        wea[4] = dmem.st_wstrb[4] & ena[4];
-        wea[5] = dmem.st_wstrb[5] & ena[5];
-        wea[6] = dmem.st_wstrb[6] & ena[6];
-        wea[7] = dmem.st_wstrb[7] & ena[7];
-        
         // Always enable BRAM for store operations
         ena[0] = dmem.st_valid && dmem.st_ready;
         ena[1] = dmem.st_valid && dmem.st_ready;
@@ -232,6 +222,16 @@ module dmem_model #(
         enb[5] = dmem.ld_valid && dmem.ld_ready;
         enb[6] = dmem.ld_valid && dmem.ld_ready;
         enb[7] = dmem.ld_valid && dmem.ld_ready;
+
+        // Set write enables based on wstrb
+        wea[0] = dmem.st_wstrb[0] & ena[0];
+        wea[1] = dmem.st_wstrb[1] & ena[1];
+        wea[2] = dmem.st_wstrb[2] & ena[2];
+        wea[3] = dmem.st_wstrb[3] & ena[3];
+        wea[4] = dmem.st_wstrb[4] & ena[4];
+        wea[5] = dmem.st_wstrb[5] & ena[5];
+        wea[6] = dmem.st_wstrb[6] & ena[6];
+        wea[7] = dmem.st_wstrb[7] & ena[7];
 
 
     end
