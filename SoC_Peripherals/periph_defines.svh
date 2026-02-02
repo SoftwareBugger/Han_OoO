@@ -11,11 +11,12 @@ parameter [31:0] SPI_BASE  = 32'h8000_0000;
 parameter [31:0] UART_BASE = 32'h8000_1000;
 
 // SPI register offsets (byte)
-parameter [7:0] SPI_REG_TXRX   = 8'h00;
-parameter [7:0] SPI_REG_STATUS = 8'h04;
-parameter [7:0] SPI_REG_CTRL   = 8'h08;
-parameter [7:0] SPI_REG_CLKDIV = 8'h0C;
-parameter [7:0] SPI_REG_GPIO   = 8'h10;
+parameter [7:0] SPI_REG_TX   = 8'h00;
+parameter [7:0] SPI_REG_RX   = 8'h04;
+parameter [7:0] SPI_REG_STATUS = 8'h08;
+parameter [7:0] SPI_REG_CTRL   = 8'h0C;
+parameter [7:0] SPI_REG_CLKDIV = 8'h10;
+parameter [7:0] SPI_REG_GPIO   = 8'h14;
 
 // UART register offsets (byte)
 parameter [7:0] UART_REG_DATA     = 8'h00;

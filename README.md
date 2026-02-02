@@ -42,7 +42,7 @@ HanOoO exists to build a mental model you can trust by implementing the real mac
 - 0x00000000 - 0x00002000 Boot ROM
 - 0x00002000 - 0x00006000 .text, .rodata, .data, .bss ...
 - 0x00006000 - 0x00007fff stack
-- 0x80000000 - 0x80000010 SPI TX
+- 0x80000000 - 0x80000014 SPI TX
 - 0x80001000 - 0x8000100c UART RX/TX
 
 See app.ld, boot.ld, boot.S, crt0.S for details, these are boot code

@@ -20,6 +20,8 @@ module mem_system #(
     // extra OLED control pins (could be generic GPIO)
     output logic              spi_dc,
     output logic              spi_res_n,
+    output logic              spi_vccen,   // optional Vcc enable
+    output logic              spi_pmoden,  // optional Pmod power enable
 
     // UART pins
     input  logic              uart_rx_i,
@@ -62,6 +64,8 @@ module mem_system #(
         .spi_cs_n   (spi_cs_n),
         .spi_dc     (spi_dc),
         .spi_res_n  (spi_res_n),
+        .spi_vccen  (spi_vccen),
+        .spi_pmoden (spi_pmoden),
         .mmio       (spi_mmio.slave)
     );
 

@@ -24,24 +24,17 @@ static void uart_puthex32(uint32_t v) {
 
 int main(void) {
     uart_set_baud(217);
-    uart_puts_ram("spi_rx_diag\r\n");
+    uart_puts_ram("spi_tx_sending\r\n");
 
     spi_init(100, SPI_CTRL_EN | SPI_CTRL_WIDTH8 | SPI_CTRL_POS_EDGE);
 
     while (1) {
         spi_cs_assert();
 
-        rx_log[0] = spi_xfer(0xAA);
-        rx_log[1] = spi_xfer(0x55);
-        rx_log[2] = spi_xfer(0xAA);
-        rx_log[3] = spi_xfer(0x55);
+        uint8_t buf[] = {0xDE, 0xAD, 0xBE, 0xEF};
+        spi_write_bytes(buf, sizeof(buf)); // JEDEC ID command
 
         spi_cs_deassert();
-
-        // Make all 4 reads *un-optimizable*
-        sink ^= (uint32_t)rx_log[0] | ((uint32_t)rx_log[1]<<8) | ((uint32_t)rx_log[2]<<16) | ((uint32_t)rx_log[3]<<24);
-        uart_puthex32(sink);
-        uart_puts_ram("\r\n");
 
         // Optional: print once per loop, after CS high (safe)
         uart_puts_ram("done\r\n");

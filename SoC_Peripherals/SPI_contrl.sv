@@ -18,6 +18,8 @@ module spi_mmio_gpio_cs (
   // extra OLED control pins (could be generic GPIO)
   output logic              spi_dc,
   output logic              spi_res_n,
+  output logic              spi_vccen,   // optional Vcc enable
+  output logic              spi_pmoden,  // optional Pmod power enable
 
   // MMIO
    mmio_if.slave mmio
@@ -75,6 +77,8 @@ module spi_mmio_gpio_cs (
   assign pos_edge = ctrl_reg[0];
   logic width8;
   assign width8   = ctrl_reg[1];
+  logic clk_phase;
+  assign clk_phase = ctrl_reg[2];
 
   // GPIO outputs: SW owns these
   // bit0 CS_N (active low)
@@ -84,6 +88,8 @@ module spi_mmio_gpio_cs (
     spi_cs_n  = gpio_reg[0];
     spi_dc    = gpio_reg[1];
     spi_res_n = gpio_reg[2];
+    spi_vccen  = gpio_reg[3];
+    spi_pmoden = gpio_reg[4];
   end
 
   // ---------------------------
@@ -98,7 +104,7 @@ module spi_mmio_gpio_cs (
   // - CS asserted (optional policy: require CS low)
   // - spi_ready
   logic wr_txrx;
-  assign wr_txrx = fire & mmio_we & (addr[7:0] == SPI_REG_TXRX);
+  assign wr_txrx = fire & mmio_we & (addr[7:0] == SPI_REG_TX);
 
   always_comb begin
     spi_wrt = 1'b0;
@@ -123,6 +129,7 @@ module spi_mmio_gpio_cs (
     .MISO     (spi_miso),
     .MISO_data(rx_data_reg[15:0]),
     .pos_edge (pos_edge),
+    .clk_phase(clk_phase),
     .width8   (width8),
     .clkdiv   (clkdiv_reg[15:0])  // if your SPI_TX has clkdiv port
   );
@@ -132,7 +139,7 @@ module spi_mmio_gpio_cs (
   // ---------------------------
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      ctrl_reg   <= 32'h0000_0102; // EN=1 (bit8), width8=1 (bit1), pos_edge=0
+      ctrl_reg   <= 32'h0000_0106; // EN=1 (bit8), width8=1 (bit1), pos_edge=0, clk_phase=1
       clkdiv_reg <= 32'd4;
       gpio_reg   <= 32'h0000_0007; // CS_N=1, DC=1, RES_N=1 (safe inactive)
     end else if (fire && mmio_we) begin
@@ -159,7 +166,7 @@ module spi_mmio_gpio_cs (
       SPI_REG_CTRL:   mmio_rdata = ctrl_reg;
       SPI_REG_CLKDIV: mmio_rdata = clkdiv_reg;
       SPI_REG_GPIO:   mmio_rdata = gpio_reg;
-      SPI_REG_TXRX:   mmio_rdata = mmio_we ? '0 : rx_data_reg;
+      SPI_REG_RX:   mmio_rdata = rx_data_reg;
       default:    mmio_rdata = 32'h0;
     endcase
   end

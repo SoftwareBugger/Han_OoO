@@ -281,7 +281,7 @@ module tb_mem_system_lsu_style;
 
       for (j = 0; j < seq.size(); j++) begin
         spi_wait_ready();
-        dmem_store32(SPI_BASE + SPI_REG_TXRX, {24'h0, seq[j]});
+        dmem_store32(SPI_BASE + SPI_REG_TX, {24'h0, seq[j]});
       end
 
       spi_wait_ready();

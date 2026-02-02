@@ -112,7 +112,7 @@ module tb_soc_system;
   // -------------------------
   // SoC pins
   // -------------------------
-  wire  spi_sclk, spi_mosi, spi_cs_n, spi_dc, spi_res_n;
+  wire  spi_sclk, spi_mosi, spi_cs_n, spi_dc, spi_res_n, spi_vccen, spi_pmoden;
   logic spi_miso;
 
   logic uart_rx_i;
@@ -130,6 +130,8 @@ module tb_soc_system;
     .spi_cs_n  (spi_cs_n),
     .spi_dc    (spi_dc),
     .spi_res_n (spi_res_n),
+    .spi_vccen (spi_vccen),
+    .spi_pmoden(spi_pmoden),
     .uart_rx_i (uart_rx_i),
     .uart_tx_o (uart_tx_o)
   );

@@ -5,6 +5,7 @@ module SPI_TX (
   input  logic        wrt,        // start when done==1
   input  logic [15:0] tx_data,
   input  logic        pos_edge,
+  input  logic        clk_phase,
   input  logic        width8,
 
   input  logic [15:0] clkdiv,     // NEW: programmable divider
@@ -26,6 +27,7 @@ module SPI_TX (
 
   logic [15:0] div_cnt;
   logic        sclk_int;
+  logic        sclk_int_ff;
   logic        tick;
 
   logic rst_cnt, en_bit, shft;
@@ -50,19 +52,56 @@ module SPI_TX (
     end
   end
 
+  // else if (state == TRAIL) begin
+  //       if (div_cnt == (clkdiv >> 1)) begin
+  //         div_cnt <= 16'd0;
+  //         tick    <= 1'b1;
+  //       end else
+  //         div_cnt <= div_cnt + 1'b1;
+  //     end 
+
   // ------------------------
   // SCLK generation
   // ------------------------
   always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-      sclk_int <= 1'b0;
-    else if (state == IDLE)
-      sclk_int <= pos_edge ? 1'b0 : 1'b1;
-    else if (tick)
+    if (!rst_n) begin
+      sclk_int <= 1'b1;
+      sclk_int_ff <= 1'b1;
+    end else if (state == IDLE) begin
+      sclk_int <= clk_phase ? 1'b1 : 1'b0;
+      sclk_int_ff <= sclk_int;
+    end else if (tick && nstate != IDLE) begin
       sclk_int <= ~sclk_int;
+      sclk_int_ff <= sclk_int;
+    end else begin
+      sclk_int_ff <= sclk_int;
+    end
   end
 
   assign SCLK = sclk_int;
+
+  logic pos_edge_sclk;
+  logic neg_edge_sclk;
+  assign pos_edge_sclk = (sclk_int == 1'b0) && (tick && nstate != IDLE);
+  assign neg_edge_sclk = (sclk_int == 1'b1) && (tick && nstate != IDLE);
+
+  logic seen_rise;
+  logic seen_fall;
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      seen_rise <= 1'b0;
+      seen_fall <= 1'b0;
+    end else begin
+      if (pos_edge_sclk)
+        seen_rise <= 1'b1;
+      if (neg_edge_sclk)
+        seen_fall <= 1'b1;
+      if (state == IDLE) begin
+        seen_rise <= 1'b0;
+        seen_fall <= 1'b0;
+      end
+    end
+  end
 
   // ------------------------
   // Shift register
@@ -76,7 +115,13 @@ module SPI_TX (
       shft_reg <= {shft_reg[14:0], 1'b0};
   end
 
-  assign MOSI = shft_reg[15];
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      MOSI <= 1'b0;
+    else if (shft && state != IDLE)
+      MOSI <= shft_reg[15];
+  end
+
 
   // ------------------------
   // Bit counter
@@ -127,8 +172,8 @@ module SPI_TX (
 
       BITS: begin
         SS_n   = 1'b0;
-        en_bit = tick & (pos_edge ? ~sclk_int : sclk_int);
-        shft   = tick & (pos_edge ? sclk_int : ~sclk_int);
+        en_bit = (pos_edge ? pos_edge_sclk && seen_fall : neg_edge_sclk && seen_rise);
+        shft   = (pos_edge ? neg_edge_sclk : pos_edge_sclk);
 
         if ((!width8 && bit_cntr == 5'd16) ||
             ( width8 && bit_cntr == 5'd8))

@@ -4,25 +4,35 @@ module SoC_top #(
     input  logic        clk,   // 125 MHz from Zybo Z7 PL clock pin (K17)
     input  logic [3:0]  sw,
     input  logic [3:0]  btn,
-    output logic [3:0]  led
+    output logic [3:0]  led,
+
+    // ================= External peripheral pins (remap in XDC freely) =================
+    output logic        spi_sclk,
+    output logic        spi_mosi,
+    output logic        spi_cs_n,
+    output logic        spi_dc,
+    output logic        spi_res_n,
+    output logic        spi_vccen,
+    output logic        spi_pmoden,
+
+     input  logic        uart_rx_i,
+    output logic        uart_tx_o
 );
+    logic        spi_miso;
+    assign spi_miso = 1'b0; // unused for OLED, tie to ground
 
     // ================================================================
     // 1) Raw reset request from button (active-low)
     // ================================================================
     logic rst_req_n;
-    assign rst_req_n = ~btn[0];  // pressed => 0 (assert reset request)
+    assign rst_req_n = ~btn[0];
 
     // ================================================================
-    // 3) PLL / MMCM (Clocking Wizard)
-    //    - Input:  125 MHz (clk)
-    //    - Output: 25 MHz  (clk_25Mhz)
+    // 3) PLL / MMCM (Clocking Wizard) 125MHz -> 25MHz
     // ================================================================
     logic clk_25Mhz;
     logic pll_locked;
 
-    // Clocking wizard reset is typically active-high.
-    // Hold it in reset while the pushbutton reset request is asserted.
     clk_wiz_0 u_pll (
         .clk_25Mhz (clk_25Mhz),
         .reset     (~rst_req_n),
@@ -31,14 +41,10 @@ module SoC_top #(
     );
 
     // ================================================================
-    // 4) Create a clean reset for the *25 MHz* domain
-    //    - async assert when either:
-    //        a) user reset request is asserted (debounced clean reset in 125 domain deasserted)
-    //        b) PLL is not locked
-    //    - sync deassert to clk_25Mhz
+    // 4) Clean reset in 25MHz domain
     // ================================================================
     logic rst_n_25_async;
-    assign rst_n_25_async = rst_req_n & pll_locked; // active-high "reset_n" pre-sync
+    assign rst_n_25_async = rst_req_n & pll_locked;
 
     (* ASYNC_REG = "TRUE" *) logic [1:0] rst_sync_25;
     always_ff @(posedge clk_25Mhz or negedge rst_n_25_async) begin
@@ -52,59 +58,58 @@ module SoC_top #(
     assign rst_n_clean = rst_sync_25[1];
 
     // ================================================================
-    // Internal interfaces (run on 25 MHz)
+    // Debug taps from SoC_system_top (to preserve LED pages)
     // ================================================================
-    dmem_if #(.LDTAG_W(4)) dmem_cpu();
-    imem_if imem();
-
-    // Debug wires from CPU
     logic        dbg_commit_valid, dbg_wb_valid, dbg_redirect_valid, dbg_mispredict;
     logic [31:0] dbg_commit_pc;
 
-    cpu_core cpu_inst (
-        .clk(clk_25Mhz),
-        .rst_n(rst_n_clean),
-        .dmem(dmem_cpu),
-        .imem(imem),
+    logic        imem_req_valid, imem_req_ready, imem_resp_valid, imem_resp_ready;
 
+    logic        dmem_st_valid, dmem_st_ready;
+    logic [31:0] dmem_st_addr;
+    logic [63:0] dmem_st_wdata;
+    logic [7:0]  dmem_st_wstrb;
+
+    // -------------------------
+    // DUT: full SoC system (exactly like TB style)
+    // -------------------------
+    SoC_system_top soc_dut (
+        .clk        (clk_25Mhz),
+        .rst_n      (rst_n_clean),
+
+        .spi_sclk   (spi_sclk),
+        .spi_mosi   (spi_mosi),
+        .spi_miso   (spi_miso),
+        .spi_cs_n   (spi_cs_n),
+        .spi_dc     (spi_dc),
+        .spi_res_n  (spi_res_n),
+        .spi_vccen  (spi_vccen),
+        .spi_pmoden (spi_pmoden),
+
+        .uart_rx_i  (uart_rx_i),
+        .uart_tx_o  (uart_tx_o),
+
+        // debug exports
         .dbg_commit_valid   (dbg_commit_valid),
         .dbg_wb_valid       (dbg_wb_valid),
         .dbg_redirect_valid (dbg_redirect_valid),
-        .dbg_mispredict_fire(dbg_mispredict),
-        .dbg_commit_pc      (dbg_commit_pc)
+        .dbg_mispredict     (dbg_mispredict),
+        .dbg_commit_pc      (dbg_commit_pc),
+
+        .imem_req_valid     (imem_req_valid),
+        .imem_req_ready     (imem_req_ready),
+        .imem_resp_valid    (imem_resp_valid),
+        .imem_resp_ready    (imem_resp_ready),
+
+        .dmem_st_valid      (dmem_st_valid),
+        .dmem_st_ready      (dmem_st_ready),
+        .dmem_st_addr       (dmem_st_addr),
+        .dmem_st_wdata      (dmem_st_wdata),
+        .dmem_st_wstrb      (dmem_st_wstrb)
     );
 
     // ================================================================
-    // Memories (run on 25 MHz)
-    // ================================================================
-    imem #(
-        .MEM_WORDS(8192),
-        .LATENCY(1),
-        .RESP_FIFO_DEPTH(4)
-    ) imem_inst (
-        .clk(clk_25Mhz),
-        .rst_n(rst_n_clean),
-        .req_valid(imem.imem_req_valid),
-        .req_ready(imem.imem_req_ready),
-        .req_addr(imem.imem_req_addr),
-        .resp_valid(imem.imem_resp_valid),
-        .resp_ready(imem.imem_resp_ready),
-        .resp_inst(imem.imem_resp_inst)
-    );
-
-    dmem_model #(
-        .MEM_SIZE_KB(64),
-        .LD_LATENCY(2),
-        .ST_LATENCY(2),
-        .LDTAG_W   (4)
-    ) dmem_direct_inst (
-        .clk(clk_25Mhz),
-        .rst_n(rst_n_clean),
-        .dmem(dmem_cpu)
-    );
-
-    // ================================================================
-    // Debug state (human-visible) — all in 25 MHz domain
+    // Debug state — SAME LED behavior as before
     // ================================================================
     // Heartbeat
     logic [25:0] hb;
@@ -129,7 +134,7 @@ module SoC_top #(
         end
     end
 
-    // Counters (use lower bits for easy visibility)
+    // Counters
     logic [31:0] commit_cnt, wb_cnt;
     always_ff @(posedge clk_25Mhz) begin
         if (!rst_n_clean) begin
@@ -141,15 +146,15 @@ module SoC_top #(
         end
     end
 
-    // IMEM traffic counters (independent of commit)
+    // IMEM traffic counters
     logic [31:0] imem_req_cnt, imem_resp_cnt;
     always_ff @(posedge clk_25Mhz) begin
         if (!rst_n_clean) begin
             imem_req_cnt  <= '0;
             imem_resp_cnt <= '0;
         end else begin
-            if (imem.imem_req_valid  && imem.imem_req_ready)  imem_req_cnt  <= imem_req_cnt + 1'b1;
-            if (imem.imem_resp_valid && imem.imem_resp_ready) imem_resp_cnt <= imem_resp_cnt + 1'b1;
+            if (imem_req_valid  && imem_req_ready)  imem_req_cnt  <= imem_req_cnt + 1'b1;
+            if (imem_resp_valid && imem_resp_ready) imem_resp_cnt <= imem_resp_cnt + 1'b1;
         end
     end
 
@@ -177,7 +182,7 @@ module SoC_top #(
         end
     end
 
-    // Page 6: freeze-on-button snapshot (stable readout)
+    // Page 6: freeze-on-button snapshot
     logic [2:0] btn_sel_q;
     always_ff @(posedge clk_25Mhz) begin
         if (!rst_n_clean) btn_sel_q <= 3'd0;
@@ -207,7 +212,31 @@ module SoC_top #(
         endcase
     end
 
-    // DONE latch: tolerate off-by-4 (PC vs PC+4)
+    logic spi_cs_seen_low;
+    logic spi_sclk_seen_toggle;
+    logic spi_sclk_last;
+    always_ff @(posedge clk_25Mhz) begin
+        if (!rst_n_clean) begin
+            spi_cs_seen_low      <= 1'b0;
+            spi_sclk_seen_toggle <= 1'b0;
+            spi_sclk_last        <= 1'b1;
+        end else begin
+            spi_sclk_last <= spi_sclk;
+            if (!spi_cs_n) spi_cs_seen_low <= 1'b1;
+            if (spi_sclk != spi_sclk_last) spi_sclk_seen_toggle <= 1'b1;
+        end
+    end
+
+    logic [3:0] spi_info_nib;
+    always_comb begin
+        unique case (btn[3:1])
+            3'd0: spi_info_nib = {spi_cs_seen_low, spi_sclk_seen_toggle, spi_mosi, spi_res_n};
+            3'd1: spi_info_nib = {spi_vccen, spi_pmoden, spi_dc, 1'b0};
+            default: spi_info_nib = 4'h0;
+        endcase
+    end
+
+    // DONE latch (same as before)
     localparam logic [31:0] LAST_PC = 32'h000006a4;
     logic done;
     always_ff @(posedge clk_25Mhz) begin
@@ -216,38 +245,32 @@ module SoC_top #(
             done <= 1'b1;
     end
 
-    // Pick an aligned MMIO address for DONE (recommended)
-    localparam logic [31:0] DONE_ADDR = 32'h00001000; // 8-byte aligned is safest
+    // MMIO store-data latch (same behavior, now from exported store channel)
+    localparam logic [31:0] DONE_ADDR = 32'h10000000;
 
     logic [31:0] st_data_full;
 
-    // Helper: extract the 32-bit word being written given 64-bit data + 8-bit strb
     function automatic logic [31:0] extract_sw_data64(
         input logic [63:0] data64,
         input logic [7:0]  strb8
     );
-        // We expect an SW => exactly 4 contiguous byte lanes set.
-        // Common patterns in a 64-bit beat: 0x0F (low word) or 0xF0 (high word).
         unique case (strb8)
             8'b0000_1111: extract_sw_data64 = data64[31:0];
             8'b1111_0000: extract_sw_data64 = data64[63:32];
-            default:      extract_sw_data64 = 32'hDEAD_BAD0; // debug marker for "unexpected pattern"
+            default:      extract_sw_data64 = 32'hDEAD_BAD0;
         endcase
     endfunction
 
     always_ff @(posedge clk_25Mhz) begin
         if (!rst_n_clean) begin
             st_data_full <= 32'd0;
-        end else if (dmem_cpu.st_valid && dmem_cpu.st_ready) begin
-            if ({dmem_cpu.st_addr[31:3], 3'b000} == DONE_ADDR) begin
-                // Only latch when this transaction is really an SW-like pattern
-                if (dmem_cpu.st_wstrb == 8'b0000_1111 || dmem_cpu.st_wstrb == 8'b1111_0000) begin
-                    st_data_full <= extract_sw_data64(dmem_cpu.st_wdata, dmem_cpu.st_wstrb);
-                end
+        end else if (dmem_st_valid && dmem_st_ready) begin
+            if ({dmem_st_addr[31:3], 3'b000} == DONE_ADDR) begin
+                if (dmem_st_wstrb == 8'b0000_1111 || dmem_st_wstrb == 8'b1111_0000)
+                    st_data_full <= extract_sw_data64(dmem_st_wdata, dmem_st_wstrb);
             end
         end
     end
-
 
     logic [3:0] st_data;
     always_comb begin
@@ -264,12 +287,10 @@ module SoC_top #(
         endcase
     end
 
-    // ================================================================
-    // Debug pages on LEDs (select via sw[3:0])
-    // ================================================================
+    // LED pages (unchanged)
     always_comb begin
         unique case (sw[3:0])
-            4'h0: led = {pll_locked, 2'b00, rst_n_clean}; // [3]=PLL locked, [0]=rst released
+            4'h0: led = {pll_locked, 2'b00, rst_n_clean};
             4'h1: led = hb[25:22];
             4'h2: led = {commit_seen, wb_seen, redirect_seen, mispred_seen};
             4'h3: led = commit_cnt[17:14];
@@ -280,13 +301,11 @@ module SoC_top #(
             4'h8: led = {done, commit_seen, 2'b00};
             4'h9: led = imem_req_cnt[17:14];
             4'hA: led = imem_resp_cnt[17:14];
-            4'hB: led = {imem.imem_req_valid, imem.imem_req_ready, imem.imem_resp_valid, imem.imem_resp_ready};
+            4'hB: led = {imem_req_valid, imem_req_ready, imem_resp_valid, imem_resp_ready};
             4'hC: led = st_data;
+            4'hD: led = spi_info_nib;
             default: led = 4'b0000;
         endcase
     end
-
-
-
 
 endmodule
