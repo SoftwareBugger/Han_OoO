@@ -30,7 +30,7 @@ void game_init(GameState *g) {
     g->on_ground = true;
     g->facing = +1;
 
-    g->scroll_speed = 2;
+    g->scroll_speed = 3;
 
     clear_obstacles(g);
 
@@ -52,7 +52,7 @@ void game_handle_input(GameState *g, InputEvent ev) {
 
     if (ev == INPUT_JUMP) {
         if (g->on_ground) {
-            g->vy = -8;
+            g->vy = -9;
             g->on_ground = false;
         }
     } else if (ev == INPUT_LEFT) {

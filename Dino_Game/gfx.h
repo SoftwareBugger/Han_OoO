@@ -30,9 +30,9 @@ void fb_putpixel(Framebuffer *fb, int x, int y, uint16_t color);
 void fb_rectfill(Framebuffer *fb, int x, int y, int w, int h, uint16_t color);
 
 // Blit 1bpp sprite in vertical-page format (transparent where bit=0)
-// int fb_blit_v8_1bpp(
-//     Framebuffer *fb,
-//     const SpriteV8 *spr,
-//     int dstx, int dsty,
-//     uint16_t fg
-// );
+int fb_blit_v8_1bpp(
+    Framebuffer *fb,
+    const SpriteV8 *spr,
+    int dstx, int dsty,
+    uint16_t fg
+);
