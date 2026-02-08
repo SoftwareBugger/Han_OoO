@@ -33,6 +33,8 @@ This is an **educational microarchitecture project**, not a production CPU.
 - Accepts UART input
 - Demonstrates a simple Dino runner game
 
+![FPGA Demo](FPGA.jpg)
+
 ---
 
 ## Architecture Overview
