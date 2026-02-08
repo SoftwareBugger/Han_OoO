@@ -2,17 +2,16 @@
 # Build all C tests in this directory into .elf/.bin/.hex
 #
 # This Makefile builds:
-#   1) boot.hex        : Boot ROM at 0x0000_0000 (boot.S linked with boot.ld)
-#   2) <test>.hex      : Application image (ELF linked to 0x0000_2000, but hex is a flat blob)
-#   3) imem_<test>.hex : COMBINED IMEM image (boot@0 + padding + app@0x2000)  <-- recommended
+#   1) <test>.hex      : Application image (ELF linked at 0x0000_0000)
+#   2) imem_<test>.hex : IMEM image (app only, no boot patching)
 #
-# Typical flow (recommended):
-#   make                     # builds boot + imem_<test>.hex for all tests
-#   make imem_t10_hello_soc   # builds combined image for one test
+# Typical flow:
+#   make                     # builds imem_<test>.hex for all tests
+#   make imem_t10_hello_soc   # builds imem image for one test
 #
 # Your testbench/BRAM init should load:
 #   - build/imem_<test>.hex at address 0x0000_0000
-# CPU resets at PC=0 -> executes boot -> jr 0x2000 -> app crt0/main
+# CPU resets at PC=0 -> app crt0/main
 
 RISCV_PREFIX ?= riscv64-unknown-elf-
 CC      := $(RISCV_PREFIX)gcc
@@ -45,13 +44,12 @@ ABI  ?= ilp32
 O ?= 1
 
 # Address map (must match app.ld IMEM ORIGIN)
-APP_BASE ?= 0x00002000
+APP_BASE ?= 0x00000000
 
 # Linker / startup
 APP_LINKER_SCRIPT ?= app.ld
 CRT0              ?= crt0.S
 
-# Boot ROM (linked to 0x0000_0000)
 BOOT_LINKER_SCRIPT ?= boot.ld
 BOOT_S             ?= boot.S
 
@@ -105,7 +103,7 @@ LDLIBS ?=
 
 .PHONY: all list clean toolchain golden golden-clean boot imem imem-all
 
-# Default: build combined images for all tests (recommended)
+# Default: build imem images for all tests
 all: imem-all
 
 list:
@@ -119,7 +117,7 @@ toolchain:
 	@$(CC) --version | head -n 2
 
 # Build a named test: `make t08_sort_search`
-$(TESTS): %: boot imem_%
+$(TESTS): %: imem_%
 	@true
 
 # Ensure build dir exists
@@ -127,23 +125,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
 # ------------------------------------------------------------------------------
-# Boot ROM build
-boot: $(HEX_DIR)/boot.hex
-
-$(BUILD_DIR)/boot.o: $(BOOT_S) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(ELF_DIR)/boot.elf: $(BUILD_DIR)/boot.o | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $< -o $@ $(BOOT_LDFLAGS) $(LDLIBS) -lgcc
-
-$(BIN_DIR)/boot.bin: $(ELF_DIR)/boot.elf | $(BUILD_DIR)
-	$(OBJCOPY) -O binary $< $@
-
-$(HEX_DIR)/boot.hex: $(BIN_DIR)/boot.bin $(HEXIFY) | $(BUILD_DIR)
-	$(PY) $(HEXIFY) $< $@ --strip-trailing-zeros --selfcheck
-
-# ------------------------------------------------------------------------------
-# App build (each .c becomes a standalone program linked at 0x00002000)
+# App build (each .c becomes a standalone program linked at 0x00000000)
 COMMON_OBJS :=
 
 # Startup object (optional; only used if CRT0 exists)
@@ -171,12 +153,12 @@ $(ELF_DIR)/%.elf: $(BUILD_DIR)/%.o $(CRT0_OBJ) $(COMMON_OBJS) | $(BUILD_DIR)
 $(BIN_DIR)/%.bin: $(ELF_DIR)/%.elf | $(BUILD_DIR)
 	$(OBJCOPY) -O binary $< $@
 
-# BIN -> HEX (flat blob; only "correct" if your loader loads it at 0x2000)
+# BIN -> HEX (flat blob; load at 0x0000_0000)
 $(HEX_DIR)/%.hex: $(BIN_DIR)/%.bin $(HEXIFY) | $(BUILD_DIR)
 	$(PY) $(HEXIFY) $< $@ --strip-trailing-zeros --selfcheck
 
 # ------------------------------------------------------------------------------
-# Combined IMEM image (boot@0x0 + padding + app@APP_BASE)  <-- USE THIS
+# IMEM image (app only, no boot patching)
 #
 # Produces:
 #   build/imem_<test>.bin
@@ -184,27 +166,22 @@ $(HEX_DIR)/%.hex: $(BIN_DIR)/%.bin $(HEXIFY) | $(BUILD_DIR)
 #
 # Load imem_<test>.hex at base 0 in your testbench/BRAM init.
 # ------------------------------------------------------------------------------
-imem: boot
+imem:
 	@if [ -z "$(TEST)" ]; then \
 	  echo "ERROR: set TEST=<name> (e.g. make imem TEST=t10_hello_soc) or use make imem_<name>"; \
 	  exit 1; \
 	fi
 	@$(MAKE) imem_$(TEST)
 
-imem-all: boot $(TESTS:%=imem_%)
+imem-all: $(TESTS:%=imem_%)
 
-imem_%: boot $(BIN_DIR)/boot.bin $(BIN_DIR)/%.bin $(HEXIFY) | $(BUILD_DIR)
-	@echo "[imem] combining boot + $* at $(APP_BASE)"
+imem_%: $(BIN_DIR)/%.bin $(HEXIFY) | $(BUILD_DIR)
+	@echo "[imem] app only at $(APP_BASE)"
 	@$(PY) -c "import pathlib; \
-boot=pathlib.Path('$(BIN_DIR)/boot.bin').read_bytes(); \
 app=pathlib.Path('$(BIN_DIR)/$*.bin').read_bytes(); \
-base=int('$(APP_BASE)',16); \
-assert base>=len(boot), f'APP_BASE {base:#x} overlaps boot size {len(boot):#x}'; \
-pad=b'\\x00'*(base-len(boot)); \
-imem=boot+pad+app; \
 out=pathlib.Path('$(BIN_DIR)/imem_$*.bin'); \
-out.write_bytes(imem); \
-print(f'[imem] boot={len(boot)} pad={len(pad)} app={len(app)} total={len(imem)} -> {out}')"
+out.write_bytes(app); \
+print(f'[imem] app={len(app)} -> {out}')"
 	@$(PY) $(HEXIFY) "$(BIN_DIR)/imem_$*.bin" "$(HEX_DIR)/imem_$*.hex" --strip-trailing-zeros --selfcheck
 	@echo "[imem] wrote $(HEX_DIR)/imem_$*.hex"
 

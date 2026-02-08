@@ -1,0 +1,15 @@
+riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32   -ffreestanding -nostdlib -O0   -T link.ld crt0.S main.c   -lgcc -o prog.elf
+
+riscv64-unknown-elf-objcopy -O binary prog.elf prog.bin
+
+python3 - <<'PY'
+import struct
+data = open("prog.bin","rb").read()
+if len(data)%4: data += b"\x00"*(4-(len(data)%4))
+with open("prog.hex","w") as f:
+    for i in range(0,len(data),4):
+        w = struct.unpack_from("<I", data, i)[0]
+        f.write(f"{w:08x}\n")
+print("Wrote prog.hex words =", len(data)//4)
+PY
+

@@ -102,6 +102,52 @@ static uint8_t uart_getc_blocking(void) {
     return (uint8_t)mmio_read32(UART_BASE + UART_DATA);
 }
 
+static inline char _hex_nibble(uint8_t v) {
+    return (v < 10) ? ('0' + v) : ('A' + (v - 10));
+}
+
+static inline void uart_puthex8(uint8_t v) {
+    uart_putc(_hex_nibble((v >> 4) & 0xF));
+    uart_putc(_hex_nibble(v & 0xF));
+}
+
+static inline void uart_putdec(int v) {
+    char buf[12];
+    int i = 0;
+
+    if (v == 0) {
+        uart_putc('0');
+        return;
+    }
+
+    if (v < 0) {
+        uart_putc('-');
+        v = -v;
+    }
+
+    while (v > 0) {
+        buf[i++] = '0' + (v % 10);
+        v /= 10;
+    }
+
+    while (i--) {
+        uart_putc(buf[i]);
+    }
+}
+
+// Print a 32-bit value as 8 hex chars
+static inline void uart_puthex(uint32_t v) {
+    uart_putc(_hex_nibble((v >> 28) & 0xF));
+    uart_putc(_hex_nibble((v >> 24) & 0xF));
+    uart_putc(_hex_nibble((v >> 20) & 0xF));
+    uart_putc(_hex_nibble((v >> 16) & 0xF));
+    uart_putc(_hex_nibble((v >> 12) & 0xF));
+    uart_putc(_hex_nibble((v >>  8) & 0xF));
+    uart_putc(_hex_nibble((v >>  4) & 0xF));
+    uart_putc(_hex_nibble((v >>  0) & 0xF));
+}
+
+
 
 /* ============================================================
  * MMIO “barrier” primitives (software-only)
@@ -288,14 +334,26 @@ static inline void oled_write_cmdN(const uint8_t *buf, int n) {
     spi_txn_end();
 }
 
+static inline void oled_write_dataN(const uint8_t *buf, int n) {
+    spi_data_begin();
+    spi_write_bytes(buf, n);
+    spi_txn_end();
+}
+
 /* ============================================================
  * Reset pulse helper
  * ============================================================
  */
-
+#define SIMULATION
+#ifdef SIMULATION
+static inline void delay_ms(uint32_t ms) {
+    while (ms--) delay_cycles(1); // adjust
+}
+#else
 static inline void delay_ms(uint32_t ms) {
     while (ms--) delay_cycles(50000); // adjust
 }
+#endif
 
 static inline void oled_reset_pulse(void) {
     spi_res_deassert(); // RES_N=1
@@ -374,6 +432,14 @@ void oled_init_ssd1331(void) {
     // 22) master current attenuation
     oled_write_cmd2(0x87, 0x06);
 
+    // // 'Set Column Address' - default is 0-95, which is
+    // // also what we want.
+    uint8_t col_addr[] = {0x15, 0x00, 0x5F};
+    oled_write_cmdN(col_addr, (int)sizeof(col_addr));
+    // 'Set Row Address' - default is 0-63, which is good.
+    uint8_t row_addr[] = {0x75, 0x00, 0x3F};
+    oled_write_cmdN(row_addr, (int)sizeof(row_addr));
+
     // 23-25) contrast A/B/C
     oled_write_cmd2(0x81, 0x91);
     oled_write_cmd2(0x82, 0x50);
@@ -399,107 +465,42 @@ void oled_init_ssd1331(void) {
     delay_ms(100);
 }
 
-void oled_power_on_simple(void) {
-    // Simple power-on sequence without reset or init commands
-    spi_cs_assert();
-    spi_dc_cmd();
-    oled_vccen_off();
-    oled_pmoden_on();
-    oled_reset_pulse();
-    delay_ms(20);
-    oled_vccen_on();
-    delay_ms(25);
-    // 29) display on
-    oled_write_cmd(0xFD);
-    oled_write_cmd(0x12);
-    // (Turn the display off.)
-    // oled_write_cmd(0xAE);
-
-    // // 'Set Column Address' - default is 0-95, which is
-    // // also what we want.
-    oled_write_cmd(0x15);
-    oled_write_cmd(0x00);
-    oled_write_cmd(0x5F);
-    // 'Set Row Address' - default is 0-63, which is good.
-    oled_write_cmd(0x75);
-    oled_write_cmd(0x00);
-    oled_write_cmd(0x3F);
-
-    // 'Set Color A Contrast' - default is 128.
-    oled_write_cmd(0x81);
-    oled_write_cmd(0x80);
-    // 'Set Color B Contrast' - default is 128, use 96.
-    oled_write_cmd(0x82);
-    oled_write_cmd(0x60);
-    // 'Set Color C Contrast' - default is 128.
-    oled_write_cmd(0x83);
-    oled_write_cmd(0x80);
-    // 'Set Master Current Control' - default is 15, but
-    // use 8 for ~half. (~= 'Set Brightness')
-    oled_write_cmd(0x87);
-    oled_write_cmd(0x08);
-    // 'Set Precharge A' - default is 'Color A Contrast'.
-    oled_write_cmd(0x8A);
-    oled_write_cmd(0x80);
-    // 'Set Precharge B' - default is 'Color B Contrast'.
-    oled_write_cmd(0x8B);
-    oled_write_cmd(0x60);
-    // 'Set Precharge C' - default is 'Color C Contrast'.
-    oled_write_cmd(0x8C);
-    oled_write_cmd(0x80);
-    // 'Remap Display Settings' - default is 0x40.
-    // Use 0x60 to avoid drawing lines in odd-even order.
-    oled_write_cmd(0xA0);
-    oled_write_cmd(0x60);
-    // 'Set Display Start Row' - default is 0.
-    oled_write_cmd(0xA1);
-    oled_write_cmd(0x00);
-    // 'Set Vertical Offset' - default is 0.
-    oled_write_cmd(0xA2);
-    oled_write_cmd(0x00);
-    // 'Set Display Mode' - default is 'A4'. 'A7' = invert.
-    // (The actual command byte sets the mode; no 'arg')
-    oled_write_cmd(0xA4);
-    // 'Set Multiplex Ratio.' I think this is how many
-    // rows of pixels are actually enabled; default is 63.
-    oled_write_cmd(0xA8);
-    oled_write_cmd(0x3F);
-    // (I am going to ignore the 0xAB 'Dim Mode Settings'
-    // command - it looks like it only matters if we use
-    // the 0xAC 'Dim Display' command; we will use 0xAF.)
-    // 'Set Voltage Supply Configuration'. The SSD1331 has
-    // no onboard charge pump, so we must use external
-    // voltage. (0x8E)
-    oled_write_cmd(0xAB);
-    oled_write_cmd(0x8E);
-    // 'Set Power Save Mode'. Default enabled; disable it.
-    // ('on' is 0x1A, 'off' is 0x0B)
-    oled_write_cmd(0xB0);
-    oled_write_cmd(0x0B);
-    // 'Adjust Precharge Phases.' Bits [7:4] set the
-    // precharge stage 2 period, bits [3:0] set phase 1.
-    // Default is 0x74.
-    oled_write_cmd(0xB1);
-    oled_write_cmd(0x74);
-    // 'Set Clock Divider Frequency'. Bits [7:4] set the
-    // oscillator frequency, bits [3:0]+1 set the
-    // clock division ratio. Default is 0xD0.
-    oled_write_cmd(0xB3);
-    oled_write_cmd(0xD0);
-    // (I am going to ignore the 'Set Grayscale Table'
-    // command - it has a bunch of gamma curve settings.)
-    // So, the 'Reset to Default Grayscale Table'
-    // command does make sense to call.
-    oled_write_cmd(0xB9);
-    // 'Set Precharge Level'. Default is 0x3E.
-    oled_write_cmd(0xBB);
-    oled_write_cmd(0x3E);
-    // 'Set Logic 0 Threshold'. Default is 0x3E = 0.83*VCC.
-    oled_write_cmd(0xBE);
-    oled_write_cmd(0x3E);
-    // 'Display On'.
-    oled_write_cmd(0xAF);
+void oled_copy_obj(uint8_t col_start, uint8_t row_start, uint8_t col_end, uint8_t row_end, uint8_t new_col, uint8_t new_row) {
+    uint8_t cmd_buf[7] = {
+        0x23, // Copy Window
+        col_start,
+        row_start,
+        col_end,
+        row_end,
+        new_col,
+        new_row
+    };
+    oled_write_cmdN(cmd_buf, 7);
 }
+
+void oled_clear_window(uint8_t col_start, uint8_t row_start, uint8_t col_end, uint8_t row_end) {
+    uint8_t cmd_buf[5] = {
+        0x25, // Clear Window
+        col_start,
+        row_start,
+        col_end,
+        row_end
+    };
+    oled_write_cmdN(cmd_buf, 5);
+}
+
+void oled_draw_object(uint8_t col_start, uint8_t row_start, uint8_t col_end, uint8_t row_end, const uint8_t *data) {
+    // Set column and row address window
+    uint8_t col_addr[] = {0x15, col_start, col_end};
+    oled_write_cmdN(col_addr, (int)sizeof(col_addr));
+    uint8_t row_addr[] = {0x75, row_start, row_end};
+    oled_write_cmdN(row_addr, (int)sizeof(row_addr));
+    // Write pixel data
+    int num_pixels = (col_end - col_start + 1) * (row_end - row_start + 1);
+    oled_write_dataN(data, num_pixels * 2); // assuming RGB565 (2 bytes per pixel)
+}
+
+
 
 
 
